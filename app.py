@@ -11,13 +11,13 @@ st.caption("Fast, ranked customer segments (Pandas-only, robust and simple).")
 # --- Attribute cards: alignment + compact fixed heights ---
 st.markdown("""
 <style>
-  .attr-card   { display:flex; flex-direction:column; gap:1px; min-height:10px; margin-bottom:0px; }
+  .attr-card   { display:flex; flex-direction:column; gap:1px; min-height:4px; margin-bottom:0px; }
   .attr-header { display:flex; align-items:center; justify-content:space-between; }
   .attr-title  { font-weight:700; font-size:1.08rem; margin:0; }
   /* Align Streamlit checkbox inline with the title */
   div[data-testid="stCheckbox"] { margin:0; display:flex; align-items:center; justify-content:flex-end; }
   /* Reserve just enough space for one multiselect row so all cards line up */
-  .attr-body   { min-height:6px; display:flex; align-items:center; }
+  .attr-body   { min-height:2px; display:flex; align-items:center; }
 </style>
 """, unsafe_allow_html=True)
 
