@@ -308,6 +308,6 @@ st.download_button(
 )
 
 data=csv_out.to_csv(index=False).encode("utf-8"),
-    file_name="ranked_combinations_duckdb.csv",
-    mime="text/csv"
+file_name="ranked_combinations_duckdb.csv",
+mime="text/csv"
 )
