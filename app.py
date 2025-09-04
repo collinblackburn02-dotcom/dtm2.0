@@ -374,11 +374,21 @@ selected_display_metric = display_metric_map.get(metric_choice, "Conversion %")
 def highlight_selected_metric(s):
     return ["font-weight: bold" if s.name == selected_display_metric else "" for _ in s]
 
-st.dataframe(
-    disp[table_cols].style.apply(highlight_selected_metric, axis=0),
-    use_container_width=True,
-    hide_index=True
+styled = (
+    disp[table_cols]
+    .style
+    .apply(highlight_selected_metric, axis=0)         # keep dynamic bolding
+    .set_properties(**{"text-align": "center"})       # center all body cells
+    .set_table_styles([                               
+        {"selector": "th",               "props": [("text-align", "center")]},
+        {"selector": "th.col_heading",   "props": [("text-align", "center")]},
+        {"selector": "th.row_heading",   "props": [("text-align", "center")]},
+        {"selector": "td",               "props": [("text-align", "center")]},
+    ])
 )
+
+st.dataframe(styled, use_container_width=True, hide_index=True)
+
 
 # ---------- Download CSV ----------
 csv_out = res.copy()
