@@ -8,6 +8,10 @@ st.set_page_config(page_title="Heavenly Health — Customer Insights", layout="w
 st.title("✨ Heavenly Health — Customer Insights")
 st.caption("Fast, ranked customer segments (Pandas-only, robust and simple).")
 
+# Toggle to show/hide the top (global) filters UI
+SHOW_GLOBAL_FILTERS = False   # set to True later if you want to expose them again
+
+
 # --- Attribute cards: alignment + compact fixed heights ---
 st.markdown("""
 <style>
