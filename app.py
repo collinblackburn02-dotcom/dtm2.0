@@ -102,24 +102,39 @@ with st.expander("🔎 Filters", expanded=True):
     if msku_col and sku_search:
         dff = dff[dff[msku_col].astype(str).str.contains(sku_search, case=False, na=False)]
 
-    # Attribute value filters + Include checkboxes (all included by default)
-    selections = {}
-    include_flags = {}  # label -> bool
-    if seg_cols:
-        st.markdown("**Attributes**")
-        cols = st.columns(3)
-        idx = 0
-        for label, col in seg_map.items():
-            with cols[idx % 3]:
-                include_flags[label] = st.checkbox(f"{label} — Include", value=True, key=f"include_{label}")
-                values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
-                sel = st.multiselect(label, options=values, default=[], help="Empty = All")
-                if sel:
-                    selections[col] = sel
-            idx += 1
-        # Apply value filters
-        for col, vals in selections.items():
-            dff = dff[dff[col].isin(vals)]
+   # Attribute value filters + Include checkboxes (all included by default)
+selections = {}
+include_flags = {}  # label -> bool
+if seg_cols:
+    st.markdown("**Attributes**")
+    cols = st.columns(3, gap="large")
+    idx = 0
+    for label, col in seg_map.items():
+        with cols[idx % 3]:
+            # Bold attribute name (single place the attribute appears)
+            st.markdown(f"**{label}**")
+            # Checkbox label is just "Include" so the box is before the word Include
+            include_flags[label] = st.checkbox("Include", value=True, key=f"include_{label}")
+
+            # Multiselect with no visible label (cleaner UI)
+            values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
+            sel = st.multiselect(
+                "",  # no label text
+                options=values,
+                default=[],
+                help="Empty = All",
+                placeholder="Choose options",
+                label_visibility="collapsed",  # hides the label area entirely
+                key=f"filter_{label}"
+            )
+            if sel:
+                selections[col] = sel
+        idx += 1
+
+    # Apply value filters
+    for col, vals in selections.items():
+        dff = dff[dff[col].isin(vals)]
+
 
 # Build the list of attribute columns to group by
 #  - Start from "Include" toggles
