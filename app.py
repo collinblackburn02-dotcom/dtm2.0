@@ -70,7 +70,7 @@ with st.sidebar:
   )
   max_depth = st.slider("Max combo depth", 1, 4, 4, 1)
   top_n = st.slider("Top N", 10, 1000, 50, 10)
-  min_rows = st.number_input("Minimum Visitors per group", min_value=50, value=500, step=50)
+  min_rows = st.number_input("Minimum Visitors per group", min_value=50, value=1000, step=50)
 
 # -------------------- Data --------------------
 @st.cache_data(show_spinner=False)
