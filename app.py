@@ -420,7 +420,7 @@ _attr_order = [lbl for lbl in ["Gender", "Age Range", "Homeowner", "Married", "C
                if lbl in seg_map]  # use seg_map so we only show attributes that exist
 
 # lay out tables in a 3-column grid
-cols = st.columns(3, gap="small")
+cols = st.columns(2, gap="small")
 for i, label in enumerate(_attr_order):
     colname = seg_map[label]
     tbl = compute_attr_table(df, colname)  # uses full df (static)
