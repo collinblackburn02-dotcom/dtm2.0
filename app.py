@@ -1,25 +1,25 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import duckdb
 from itertools import combinations
 from utils import resolve_col
 
 st.set_page_config(page_title="Heavenly Health — Customer Insights", layout="wide")
 st.title("✨ Heavenly Health — Customer Insights")
-st.caption("Fast, ranked customer segments powered by DuckDB (GROUPING SETS).")
+st.caption("Fast, ranked customer segments (Pandas-only, robust and simple).")
 
 # ---------- Sidebar ----------
 with st.sidebar:
     uploaded = st.file_uploader("Upload merged CSV", type=["csv"])
     st.markdown("---")
     metric_choice = st.radio(
-        "Sort / Map metric",
+        "Sort metric",
         ["Conversion %", "Purchases", "Visitors", "Revenue / Visitor"],
         index=0
     )
     max_depth = st.slider("Max combo depth", 1, 4, 2, 1)
     top_n = st.slider("Top N", 10, 1000, 50, 10)
+    min_rows = st.number_input("Minimum Visitors per group", min_value=1, value=30, step=1)
 
 @st.cache_data(show_spinner=False)
 def load_df(file):
@@ -50,17 +50,10 @@ if purchase_col is None:
     st.error("Missing Purchase column.")
     st.stop()
 
-# Purchases are already 0/1 in this dataset
-df["_PURCHASE"] = df[purchase_col].fillna(0).astype(int)
-
-# Dates (optional)
+# Prepare core numeric columns
+df["_PURCHASE"] = pd.to_numeric(df[purchase_col], errors="coerce").fillna(0).astype(int)
 df["_DATE"] = to_datetime_series(df[date_col]) if date_col else pd.NaT
-
-# Revenue (default 0 if missing)
-if revenue_col:
-    df["_REVENUE"] = pd.to_numeric(df[revenue_col], errors="coerce").fillna(0.0)
-else:
-    df["_REVENUE"] = 0.0
+df["_REVENUE"] = pd.to_numeric(df[revenue_col], errors="coerce").fillna(0.0) if revenue_col else 0.0
 
 # ---------- Segmentation Attributes ----------
 seg_map = {
@@ -84,19 +77,19 @@ with st.expander("🔎 Filters", expanded=True):
     # Treat 'U' as missing for Gender and Credit before collapsing
     for label, col in seg_map.items():
         if label in ("Gender", "Credit Rating") and col in dff.columns:
-            dff.loc[dff[col].astype(str).str.upper().str.strip() == "U", col] = pd.NA
+            mask_u = dff[col].astype(str).str.upper().str.strip().eq("U")
+            dff.loc[mask_u, col] = pd.NA
 
     # Date filter (only if DATE exists)
-    if not dff["_DATE"].dropna().empty:
+    if not pd.isna(dff["_DATE"]).all():
         mind, maxd = pd.to_datetime(dff["_DATE"].dropna().min()), pd.to_datetime(dff["_DATE"].dropna().max())
         c1, c2 = st.columns(2)
         with c1:
-            date_range = st.date_input("Date range", (mind.date(), maxd.date()))
+            start_end = st.date_input("Date range", (mind.date(), maxd.date()))
         with c2:
             include_undated = st.checkbox("Include no-date rows", value=True)
-
-        if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
-            start, end = date_range
+        if isinstance(start_end, (list, tuple)) and len(start_end) == 2:
+            start, end = start_end
             mask = dff["_DATE"].between(pd.to_datetime(start), pd.to_datetime(end))
             if include_undated:
                 mask = mask | dff["_DATE"].isna()
@@ -107,22 +100,14 @@ with st.expander("🔎 Filters", expanded=True):
     if msku_col and sku_search:
         dff = dff[dff[msku_col].astype(str).str.contains(sku_search, case=False, na=False)]
 
-    # Attribute filters
+    # Attribute value filters
     selections = {}
-    include_flags = {}
     if seg_cols:
-        st.markdown("**Attributes**")
+        st.markdown("**Attribute filters**")
         cols = st.columns(3)
         idx = 0
         for label, col in seg_map.items():
             with cols[idx % 3]:
-                mode = st.selectbox(
-                    f"{label}: mode",
-                    options=["Include", "Do not include"],
-                    index=0,
-                    key=f"mode_{label}"
-                )
-                include_flags[col] = (mode == "Include")
                 values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
                 sel = st.multiselect(label, options=values, default=[], help="Empty = All")
                 if sel:
@@ -131,142 +116,108 @@ with st.expander("🔎 Filters", expanded=True):
         for col, vals in selections.items():
             dff = dff[dff[col].isin(vals)]
 
+    # Choose attributes to use in grouping
+    st.markdown("**Attributes to include in grouping**")
+    default_group_attrs = list(seg_map.keys())  # friendly labels
+    chosen_labels = st.multiselect("Group by these attributes (combinations up to Max Depth):",
+                                   options=list(seg_map.keys()),
+                                   default=default_group_attrs)
+    group_attr_cols = [seg_map[lbl] for lbl in chosen_labels]
+
     st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
 
-# Collapse NaN/empty/"None"/"U" → "Unknown" AFTER filters (pre-DuckDB)
+# Collapse NaN/empty/"None"/"U" → "Unknown" AFTER filters (so groupings are stable)
 for col in seg_cols:
     if col in dff.columns:
         dff[col] = (
             dff[col]
+            .astype("string")
             .fillna("Unknown")
             .replace({"": "Unknown", "None": "Unknown", "U": "Unknown", "u": "Unknown"})
+            .str.strip()
         )
 
-# Included attributes and required ones
-include_cols = [c for c in seg_cols if include_flags.get(c, True)]
-required_cols = [col for col, vals in selections.items() if len(vals) > 0 and include_flags.get(col, True)]
-
-# ---------- DuckDB GROUPING SETS ----------
-con = duckdb.connect()
-con.register("t", dff)
-
-attrs = [c for c in include_cols if c in dff.columns]
-req_set = set(required_cols)
-
-sets = []
-for d in range(1, max_depth + 1):
-    for s in combinations(attrs, d):
-        if req_set.issubset(set(s)):
-            sets.append("(" + ",".join([f'"{c}"' for c in s]) + ")")
-
-if not sets:
-    if required_cols:
-        sets.append("(" + ",".join([f'"{c}"' for c in required_cols]) + ")")
-    else:
-        if attrs:
-            sets.append("(" + f'"{attrs[0]}"' + ")")
-        else:
-            sets.append("()")  # grand total only
-
-grouping_sets_sql = ",\n".join(sets)
-
-# Top SKUs (for per-segment purchase counts by SKU)
+# ---------- Top SKUs globally (among purchasers) ----------
 top_skus = []
 if msku_col and msku_col in dff.columns:
-    top_skus = con.execute(f'''
-        SELECT "{msku_col}" AS sku, COUNT(*) AS c
-        FROM t
-        WHERE _PURCHASE=1 AND "{msku_col}" IS NOT NULL AND TRIM("{msku_col}")<>''
-        GROUP BY 1
-        ORDER BY c DESC
-        LIMIT 11
-    ''').fetchdf()["sku"].astype(str).tolist()
+    top_skus = (
+        dff.loc[dff["_PURCHASE"] == 1, msku_col]
+        .astype(str).str.strip()
+        .replace({"": np.nan})
+        .dropna()
+        .value_counts()
+        .head(11)
+        .index.tolist()
+    )
 
-sku_sums = ""
+# Precompute SKU indicator columns (per-row), so groupby can sum them quickly
+sku_ind_cols = {}
 if top_skus:
-    pieces = []
     for sku in top_skus:
-        s_escaped = sku.replace("'", "''")
-        # Keep "SKU:<name>" in SQL; rename to "<name>" after fetch
-        pieces.append(
-            f"SUM(CASE WHEN \"{msku_col}\"='{s_escaped}' AND _PURCHASE=1 THEN 1 ELSE 0 END) AS \"SKU:{s_escaped}\""
-        )
-    sku_sums = ",\n  " + ",\n  ".join(pieces)
+        colname = f"__SKU_{hash(sku)%10**9}"  # collision-resistant temp name
+        sku_ind_cols[sku] = colname
+        dff[colname] = ((dff[msku_col].astype(str).str.strip() == sku) & (dff["_PURCHASE"] == 1)).astype(int)
 
-# Depth across selected attributes
-depth_expr = " + ".join([f"CASE WHEN \"{c}\" IS NULL THEN 0 ELSE 1 END" for c in attrs]) if attrs else "0"
+# ---------- Build all grouping combinations ----------
+attrs_available = [c for c in group_attr_cols if c in dff.columns]
+combo_sets = []
+for d in range(1, max_depth + 1):
+    combo_sets.extend(list(combinations(attrs_available, d)))
+if not combo_sets:
+    combo_sets = [()]  # grand total
 
-# Revenue / RPV aggregates
-revenue_sql = (
-    "SUM(_REVENUE) AS revenue,\n  1.0 * SUM(_REVENUE) / NULLIF(COUNT(*),0) AS rpv"
-    if revenue_col else
-    "0.0 AS revenue,\n  0.0 AS rpv"
-)
+# ---------- Aggregate for each combination ----------
+rows = []
+for combo in combo_sets:
+    combo = list(combo)
+    if combo:
+        # size (Visitors)
+        size_df = dff.groupby(combo, dropna=False).size().rename("Visitors").reset_index()
+        # numeric sums
+        agg_dict = {"_PURCHASE": "sum"}
+        if revenue_col:
+            agg_dict["_REVENUE"] = "sum"
+        for sku, ind in sku_ind_cols.items():
+            agg_dict[ind] = "sum"
+        sums_df = dff.groupby(combo, dropna=False).agg(agg_dict).reset_index()
+        g = size_df.merge(sums_df, on=combo, how="left")
+    else:
+        # grand total
+        g = pd.DataFrame({
+            "Visitors": [int(len(dff))],
+            "_PURCHASE": [int(dff["_PURCHASE"].sum())],
+            "_REVENUE": [float(dff["_REVENUE"].sum())] if revenue_col else [0.0],
+            **{ind: [int(dff[ind].sum())] for ind in sku_ind_cols.values()}
+        })
 
-# NOTE: No HAVING here (we filter by min_rows later)
-sql = f"""
-SELECT
-  {(", ".join([f'"{c}"' for c in attrs]) + "," if attrs else "" }
-  COUNT(*) AS Visitors,
-  SUM(_PURCHASE) AS Purchases,
-  100.0 * SUM(_PURCHASE) / NULLIF(COUNT(*),0) AS conv_rate,
-  ({depth_expr}) AS Depth,
-  {revenue_sql}
-  {sku_sums}
-FROM t
-{'GROUP BY GROUPING SETS (' + grouping_sets_sql + ')' if attrs else ''}
-"""
+    # metrics
+    g["Purchases"] = g["_PURCHASE"].astype(int)
+    g["conv_rate"] = 100.0 * g["Purchases"] / g["Visitors"].replace(0, np.nan)
+    if revenue_col:
+        g["rpv"] = g["_REVENUE"] / g["Visitors"].replace(0, np.nan)
+        g["revenue"] = g["_REVENUE"]
+    else:
+        g["rpv"] = 0.0
+        g["revenue"] = 0.0
+    g["Depth"] = len(combo)
 
-# ---------- Ranked Conversion Table ----------
-st.subheader("🏆 Ranked Conversion Table")
-min_rows = st.number_input("Minimum Visitors per group", min_value=1, value=30, step=1)
+    # keep columns in stable order: attributes → metrics → SKUs
+    cols_order = combo + ["Visitors", "Purchases", "conv_rate", "Depth", "rpv", "revenue"] + list(sku_ind_cols.values())
+    g = g[cols_order]
+    rows.append(g)
 
-# Run query (no params needed—no HAVING)
-res = con.execute(sql).fetchdf()
+# Concatenate all combinations
+res = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=["Visitors","Purchases","conv_rate","Depth"])
 
-# Rename SKU:* columns to bare SKU names (for display & CSV)
-sku_prefixed_cols = [c for c in res.columns if str(c).startswith("SKU:")]
-sku_rename = {c: c.split("SKU:", 1)[1] for c in sku_prefixed_cols}
-res = res.rename(columns=sku_rename)
+# Apply min_rows AFTER aggregation
+res = res[res["Visitors"] >= int(min_rows)].copy()
 
-# ---- DEDUPLICATE by attributes, SUM counts, then recompute metrics
-if attrs:
-    attr_cols = [c for c in attrs if c in res.columns]
-else:
-    attr_cols = []  # grand total only
-
-# Identify SKU columns after rename
-sku_cols = [sku_rename[c] for c in sku_prefixed_cols if sku_rename[c] in res.columns]
-
-agg_dict = {"Visitors": "sum", "Purchases": "sum"}
-if "revenue" in res.columns:
-    agg_dict["revenue"] = "sum"
-for c in sku_cols:
-    agg_dict[c] = "sum"
-
-if len(attr_cols) > 0:
-    grouped = res.groupby(attr_cols, as_index=False).agg(agg_dict)
-else:
-    # No attributes selected: just aggregate whole table to a single row
-    grouped = res.agg(agg_dict)
-    if isinstance(grouped, pd.Series):
-        grouped = grouped.to_frame().T
-    # keep Depth = 0 in this case
-    grouped["Depth"] = 0
-
-# Recompute metrics
-grouped["conv_rate"] = 100.0 * grouped["Purchases"] / grouped["Visitors"].replace(0, np.nan)
-if "revenue" in grouped.columns:
-    grouped["rpv"] = grouped["revenue"] / grouped["Visitors"].replace(0, np.nan)
-else:
-    grouped["rpv"] = 0.0
-
-# Ensure Depth is the number of grouping attributes when attrs exist
-if len(attr_cols) > 0:
-    grouped["Depth"] = len(attr_cols)
-
-# ---- Apply min_rows filter AFTER dedup/aggregation
-grouped = grouped[grouped["Visitors"] >= int(min_rows)]
+# Replace temp SKU indicator names with actual SKU names
+sku_cols = []
+if sku_ind_cols:
+    rename_map = {v: k for k, v in sku_ind_cols.items()}
+    res = res.rename(columns=rename_map)
+    sku_cols = list(rename_map.values())
 
 # ---- Sort & limit
 sort_key_map = {
@@ -276,45 +227,48 @@ sort_key_map = {
     "Revenue / Visitor": "rpv",
 }
 sort_key = sort_key_map[metric_choice]
-res = grouped.sort_values(sort_key, ascending=False).head(top_n).reset_index(drop=True)
+res = res.sort_values(sort_key, ascending=False).head(top_n).reset_index(drop=True)
 
-# ---- Prepare display data
-attrs_present = [c for c in attr_cols if c in res.columns]
-all_sku_cols = [c for c in sku_cols if c in res.columns]
+# ---------- Prepare display
+# Friendly attribute headers -> display names (without changing internal processing)
+friendly_attr = {v: k for k, v in seg_map.items()}
 
 disp = res.copy()
-disp.insert(0, "Rank", np.arange(1, len(disp) + 1))
+# Convert counts to ints (no .0)
+for c in ["Visitors", "Purchases", "Depth"]:
+    if c in disp.columns:
+        disp[c] = pd.to_numeric(disp[c], errors="coerce").fillna(0).astype(int)
+for c in sku_cols:
+    if c in disp.columns:
+        disp[c] = pd.to_numeric(disp[c], errors="coerce").fillna(0).astype(int)
 
-# Formats
+# Pretty formats
 disp["Conversion %"] = disp["conv_rate"].map(lambda x: f"{x:.2f}%" if pd.notnull(x) else "")
 if "rpv" in disp.columns:
     disp["Revenue / Visitor"] = disp["rpv"].map(lambda x: f"${x:,.2f}" if pd.notnull(x) else "")
 
-# Integers for counts
-for col in ["Visitors", "Purchases", "Depth"]:
-    if col in disp.columns:
-        disp[col] = pd.to_numeric(disp[col], errors="coerce").fillna(0).astype(int)
-for col in all_sku_cols:
-    if col in disp.columns:
-        disp[col] = pd.to_numeric(disp[col], errors="coerce").fillna(0).astype(int)
+# Rename attribute columns to friendly labels for display
+disp = disp.rename(columns=friendly_attr)
 
-# Ensure Unknown displays consistently
-for col in attrs_present:
-    if col in disp.columns:
-        disp[col] = disp[col].fillna("Unknown").replace({"": "Unknown", "None": "Unknown"})
+# Insert Rank
+disp.insert(0, "Rank", np.arange(1, len(disp) + 1))
 
-# ---- Column order (SKUs on the far right)
+# Column order (Purchases intentionally hidden from table per your spec)
 desired_attr_labels = [
     "Gender", "Age Range", "Homeowner", "Married", "Children",
     "Income Range", "Net Worth", "Credit Rating"
 ]
-desired_attr_cols = [seg_map[lbl] for lbl in desired_attr_labels if lbl in seg_map and seg_map[lbl] in disp.columns]
+# include only those actually present
+middle_cols = [lbl for lbl in desired_attr_labels if lbl in disp.columns]
+right_cols = [c for c in sku_cols if c in disp.columns]  # SKUs to the right
 
-left_cols = ["Rank", "Visitors", "Purchases", "Conversion %", "Depth"]
-middle_cols = desired_attr_cols
-right_cols = [c for c in all_sku_cols if c in disp.columns]
+left_cols = ["Rank", "Visitors", "Conversion %", "Depth"]  # Purchases hidden in table
 
-table_cols = left_cols + middle_cols + right_cols
+# Some groups may lack attributes; keep any extra attribute cols at the end of middle section
+extra_attrs = [c for c in friendly_attr.values() if c in disp.columns and c not in middle_cols]
+
+table_cols = left_cols + middle_cols + extra_attrs + right_cols
+table_cols = [c for c in table_cols if c in disp.columns]  # safety
 
 def highlight_conv(s):
     return ["font-weight: bold" if s.name == "Conversion %" else "" for _ in s]
@@ -325,19 +279,34 @@ st.dataframe(disp[table_cols].style.apply(highlight_conv, axis=0), use_container
 csv_out = res.copy()
 csv_out.insert(0, "Rank", np.arange(1, len(csv_out) + 1))
 
-# Same order as display (metrics remain numeric)
-csv_cols = ["Rank", "Visitors", "Purchases", "conv_rate", "Depth"] + desired_attr_cols + right_cols
+# Order CSV: include Purchases and numeric metrics; use friendly names for attributes
+csv_out = csv_out.rename(columns=friendly_attr)
+
+csv_attr_cols = [lbl for lbl in desired_attr_labels if lbl in csv_out.columns]
+extra_csv_attrs = [c for c in friendly_attr.values() if c in csv_out.columns and c not in csv_attr_cols]
+csv_sku_cols = [c for c in sku_cols if c in csv_out.columns]
+
+csv_cols = ["Rank", "Visitors", "Purchases", "conv_rate", "Depth", "rpv", "revenue"] + csv_attr_cols + extra_csv_attrs + csv_sku_cols
+csv_cols = [c for c in csv_cols if c in csv_out.columns]
 csv_out = csv_out[csv_cols].rename(columns={
-    "conv_rate": "Conversion % (0-100)"
+    "conv_rate": "Conversion % (0-100)",
+    "rpv": "Revenue / Visitor",
+    "revenue": "Revenue",
 })
-# Cast integer-like columns to Int64 (no .0 in CSV)
-int_like_cols = ["Rank", "Visitors", "Purchases", "Depth"] + right_cols
-for c in int_like_cols:
+
+# Cast integer-like columns to Int64 to avoid .0 in CSV
+int_like = ["Rank", "Visitors", "Purchases", "Depth"] + csv_sku_cols
+for c in int_like:
     if c in csv_out.columns:
         csv_out[c] = pd.to_numeric(csv_out[c], errors="coerce").fillna(0).astype("Int64")
 
 st.download_button(
     "Download ranked combinations (CSV)",
+    data=csv_out.to_csv(index=False).encode("utf-8"),
+    file_name="ranked_combinations.csv",
+    mime="text/csv"
+)
+
     data=csv_out.to_csv(index=False).encode("utf-8"),
     file_name="ranked_combinations_duckdb.csv",
     mime="text/csv"
