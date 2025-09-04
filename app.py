@@ -64,14 +64,14 @@ else:
 
 # ---------- Segmentation Attributes ----------
 seg_map = {
-    "Age Range":   resolve_col(df, "Age_Range"),
-    "Income Range":resolve_col(df, "Income_Range"),
-    "Net Worth":   resolve_col(df, "Net_Worth"),
-    "Credit Rating":resolve_col(df, "Credit_Rating"),
-    "Gender":      resolve_col(df, "Gender"),
-    "Homeowner":   resolve_col(df, "Home_Owner"),
-    "Married":     resolve_col(df, "Married"),
-    "Children":    resolve_col(df, "Children"),
+    "Age Range":     resolve_col(df, "Age_Range"),
+    "Income Range":  resolve_col(df, "Income_Range"),
+    "Net Worth":     resolve_col(df, "Net_Worth"),
+    "Credit Rating": resolve_col(df, "Credit_Rating"),
+    "Gender":        resolve_col(df, "Gender"),
+    "Homeowner":     resolve_col(df, "Home_Owner"),
+    "Married":       resolve_col(df, "Married"),
+    "Children":      resolve_col(df, "Children"),
 }
 # keep only found columns
 seg_map = {label: col for label, col in seg_map.items() if col is not None}
@@ -187,7 +187,7 @@ if top_skus:
     pieces = []
     for sku in top_skus:
         s_escaped = sku.replace("'", "''")
-        # Keep column name "SKU:<name>" in SQL; we'll rename to "<name>" after fetch
+        # Keep "SKU:<name>" in SQL; we will rename to "<name>" after fetch
         pieces.append(
             f"SUM(CASE WHEN \"{msku_col}\"='{s_escaped}' AND _PURCHASE=1 THEN 1 ELSE 0 END) AS \"SKU:{s_escaped}\""
         )
@@ -208,7 +208,7 @@ having_clause = "HAVING COUNT(*) >= ?" if attrs else ""
 
 sql = f"""
 SELECT
-  {(", ".join([f'"{c}"' for c in attrs]) + "," if attrs else "" )}
+  {(", ".join([f'"{c}"' for c in attrs]) + "," if attrs else "" }
   COUNT(*) AS Visitors,
   SUM(_PURCHASE) AS Purchases,
   100.0 * SUM(_PURCHASE) / NULLIF(COUNT(*),0) AS conv_rate,
@@ -227,12 +227,42 @@ min_rows = st.number_input("Minimum Visitors per group", min_value=1, value=30, 
 params = [int(min_rows)] if attrs else []
 res = con.execute(sql, params).fetchdf()
 
-# ---- Rename SKU:* columns to just the SKU name
+# ---- Rename SKU:* columns to just the SKU name (for both display & CSV)
 sku_prefixed_cols = [c for c in res.columns if str(c).startswith("SKU:")]
 sku_rename = {c: c.split("SKU:", 1)[1] for c in sku_prefixed_cols}
 res = res.rename(columns=sku_rename)
 
-# ---- Sort by selected metric
+# ---- DEDUPLICATE CORRECTLY (by attributes only), aggregate counts, then recompute metrics
+if attrs:
+    attr_cols = [c for c in attrs if c in res.columns]
+    # Identify SKU columns after rename
+    sku_cols = [sku_rename[c] for c in sku_prefixed_cols if sku_rename[c] in res.columns]
+
+    agg_dict = {
+        "Visitors": "sum",
+        "Purchases": "sum",
+        "revenue": "sum" if "revenue" in res.columns else "sum",
+    }
+    # Sum each SKU count column
+    for c in sku_cols:
+        agg_dict[c] = "sum"
+
+    # Group by attribute columns only
+    grouped = res.groupby(attr_cols, as_index=False).agg(agg_dict)
+
+    # Recompute metrics from aggregated totals
+    grouped["conv_rate"] = 100.0 * grouped["Purchases"] / grouped["Visitors"].replace(0, np.nan)
+    if "revenue" in grouped.columns:
+        grouped["rpv"] = grouped["revenue"] / grouped["Visitors"].replace(0, np.nan)
+    else:
+        grouped["rpv"] = 0.0
+
+    # Set Depth consistently to the number of grouping attributes
+    grouped["Depth"] = len(attr_cols)
+
+    res = grouped
+
+# ---- Sort by selected metric and limit
 sort_key_map = {
     "Conversion %": "conv_rate",
     "Purchases": "Purchases",
@@ -243,41 +273,39 @@ sort_key = sort_key_map[metric_choice]
 res = res.sort_values(sort_key, ascending=False).head(top_n).reset_index(drop=True)
 
 # ---- Prepare display data
-all_sku_cols = [sku_rename.get(c, c) for c in sku_prefixed_cols]  # renamed SKU columns
-attrs_present = [c for c in attrs if c in res.columns]
+# Attribute columns present (original df colnames)
+attrs_present = [c for c in (attrs if attrs else []) if c in res.columns]
+# SKU columns (already bare names)
+all_sku_cols = [c for c in res.columns if c not in set(attrs_present + ["Visitors","Purchases","conv_rate","Depth","rpv","revenue"])]
 
 disp = res.copy()
 disp.insert(0, "Rank", np.arange(1, len(disp) + 1))
-# pretty % and $ formats
+
+# Pretty formats
 disp["Conversion %"] = disp["conv_rate"].map(lambda x: f"{x:.2f}%" if pd.notnull(x) else "")
 if "rpv" in disp.columns:
     disp["Revenue / Visitor"] = disp["rpv"].map(lambda x: f"${x:,.2f}" if pd.notnull(x) else "")
 
-# integers with no .0 for Purchases and SKU counts
+# Integers for counts (no .0)
 for col in ["Visitors", "Purchases", "Depth"]:
     if col in disp.columns:
-        disp[col] = disp[col].fillna(0).astype(int)
+        disp[col] = pd.to_numeric(disp[col], errors="coerce").fillna(0).astype(int)
 for col in all_sku_cols:
     if col in disp.columns:
-        disp[col] = disp[col].fillna(0).astype(int)
+        disp[col] = pd.to_numeric(disp[col], errors="coerce").fillna(0).astype(int)
 
-# ensure Unknown is displayed consistently
+# Ensure Unknown displayed consistently
 for col in attrs_present:
     if col in disp.columns:
-        disp[col] = (
-            disp[col]
-            .fillna("Unknown")
-            .replace({"": "Unknown", "None": "Unknown"})
-        )
+        disp[col] = disp[col].fillna("Unknown").replace({"": "Unknown", "None": "Unknown"})
 
-# ---- Column order:
+# ---- Column order
 # Rank, Visitors, Purchases, Conversion %, Depth, Gender, Age Range, Homeowner, Married,
-# Children, Income Range, Net Worth, Credit Rating, then SKUs (far right)
+# Children, Income Range, Net Worth, Credit Rating, then SKUs
 desired_attr_labels = [
     "Gender", "Age Range", "Homeowner", "Married", "Children",
     "Income Range", "Net Worth", "Credit Rating"
 ]
-# translate labels -> actual column names found in data
 desired_attr_cols = [seg_map[lbl] for lbl in desired_attr_labels if lbl in seg_map and seg_map[lbl] in disp.columns]
 
 left_cols = ["Rank", "Visitors", "Purchases", "Conversion %", "Depth"]
@@ -295,11 +323,17 @@ st.dataframe(disp[table_cols].style.apply(highlight_conv, axis=0), use_container
 csv_out = res.copy()
 csv_out.insert(0, "Rank", np.arange(1, len(csv_out) + 1))
 
-# keep numeric columns numeric in CSV; rename columns for clarity
+# Build CSV column order using the same display order (numeric metrics stay numeric)
 csv_cols = ["Rank", "Visitors", "Purchases", "conv_rate", "Depth"] + desired_attr_cols + right_cols
 csv_out = csv_out[csv_cols].rename(columns={
     "conv_rate": "Conversion % (0-100)"
 })
+# Cast integer-like columns to Int64 (no .0 in CSV)
+int_like_cols = ["Rank", "Visitors", "Purchases", "Depth"] + right_cols
+for c in int_like_cols:
+    if c in csv_out.columns:
+        csv_out[c] = pd.to_numeric(csv_out[c], errors="coerce").fillna(0).astype("Int64")
+
 st.download_button(
     "Download ranked combinations (CSV)",
     data=csv_out.to_csv(index=False).encode("utf-8"),
