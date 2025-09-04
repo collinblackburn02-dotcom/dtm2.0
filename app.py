@@ -94,7 +94,8 @@ seg_map = {label: col for label, col in seg_map.items() if col is not None}
 seg_cols = list(seg_map.values())
 
 # ---------- Filters + Include toggles ----------
-with st.expander("🔎 Filters", expanded=True):
+if SHOW_GLOBAL_FILTERS:
+    with st.expander("🔎 Filters", expanded=False):
     dff = df.copy()
 
     # Treat 'U' as missing for Gender and Credit before collapsing
