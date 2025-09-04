@@ -25,6 +25,18 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Center all headers + cells inside st.dataframe
+st.markdown("""
+<style>
+  [data-testid="stDataFrame"] th, 
+  [data-testid="stDataFrame"] td {
+    text-align: center !important;
+    vertical-align: middle !important;
+  }
+</style>
+""", unsafe_allow_html=True)
+
+
 
 
 
