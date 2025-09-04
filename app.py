@@ -255,6 +255,18 @@ if "rpv" in disp.columns:
 # Rename attribute columns to friendly labels for display
 disp = disp.rename(columns=friendly_attr)
 
+# DISPLAY-ONLY: replace None/NaN and the literal "None" with ""
+attr_display_cols = [
+    lbl for lbl in
+    ["Gender", "Age Range", "Homeowner", "Married", "Children", "Income Range", "Net Worth", "Credit Rating"]
+    if lbl in disp.columns
+]
+for c in attr_display_cols:
+    s = disp[c].astype(object)
+    mask = s.isna() | s.astype(str).str.strip().str.lower().eq("none")
+    disp[c] = s.mask(mask, "")
+
+
 # Insert Rank
 disp.insert(0, "Rank", np.arange(1, len(disp) + 1))
 
