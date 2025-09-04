@@ -17,7 +17,7 @@ st.markdown("""
   /* Align Streamlit checkbox inline with the title */
   div[data-testid="stCheckbox"] { margin:0; display:flex; align-items:center; justify-content:flex-end; }
   /* Reserve just enough space for one multiselect row so all cards line up */
-  .attr-body   { min-height:20px; display:flex; align-items:center; }
+  .attr-body   { min-height:10px; display:flex; align-items:center; }
 </style>
 """, unsafe_allow_html=True)
 
