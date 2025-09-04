@@ -15,7 +15,7 @@ with st.sidebar:
     st.markdown("---")
     metric_choice = st.radio(
         "Sort / Map metric",
-        ["Conversion %","Purchases","Visitors","Revenue / Visitor"],
+        ["Conversion %", "Purchases", "Visitors", "Revenue / Visitor"],
         index=0
     )
     max_depth = st.slider("Max combo depth", 1, 4, 2, 1)
@@ -40,7 +40,7 @@ if not uploaded:
 # ---------- Load Data ----------
 df = load_df(uploaded)
 
-# Resolve key columns
+# Resolve key columns (case-insensitive)
 purchase_col = resolve_col(df, "Purchase")
 date_col     = resolve_col(df, "DATE")        # optional
 msku_col     = resolve_col(df, "SKU")
@@ -64,14 +64,14 @@ else:
 
 # ---------- Segmentation Attributes ----------
 seg_map = {
-    "Age": resolve_col(df, "Age_Range"),
-    "Income": resolve_col(df, "Income_Range"),
+    "Age":       resolve_col(df, "Age_Range"),
+    "Income":    resolve_col(df, "Income_Range"),
     "Net Worth": resolve_col(df, "Net_Worth"),
-    "Credit": resolve_col(df, "Credit_Rating"),
-    "Gender": resolve_col(df, "Gender"),
+    "Credit":    resolve_col(df, "Credit_Rating"),
+    "Gender":    resolve_col(df, "Gender"),
     "Homeowner": resolve_col(df, "Home_Owner"),
-    "Married": resolve_col(df, "Married"),
-    "Children": resolve_col(df, "Children"),
+    "Married":   resolve_col(df, "Married"),
+    "Children":  resolve_col(df, "Children"),
 }
 seg_map = {k: v for k, v in seg_map.items() if v is not None}
 seg_cols = list(seg_map.values())
@@ -80,12 +80,12 @@ seg_cols = list(seg_map.values())
 with st.expander("🔎 Filters", expanded=True):
     dff = df.copy()
 
-    # Clean "U" → missing for Gender and Credit
+    # Treat 'U' as missing for Gender and Credit before collapsing
     for k, col in seg_map.items():
         if k in ("Gender", "Credit") and col in dff.columns:
             dff.loc[dff[col].astype(str).str.upper().str.strip() == "U", col] = pd.NA
 
-    # Date filter
+    # Date filter (only if DATE exists)
     if not dff["_DATE"].dropna().empty:
         mind, maxd = pd.to_datetime(dff["_DATE"].dropna().min()), pd.to_datetime(dff["_DATE"].dropna().max())
         c1, c2 = st.columns(2)
@@ -108,7 +108,7 @@ with st.expander("🔎 Filters", expanded=True):
 
     # Attribute filters
     selections = {}
-    include_flags = {}
+    include_flags = {}   # ensure defined even if no seg cols
     if seg_cols:
         st.markdown("**Attributes**")
         cols = st.columns(3)
@@ -132,16 +132,20 @@ with st.expander("🔎 Filters", expanded=True):
 
     st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
 
-# Collapse NaN/empty into "Unknown"
+# Collapse NaN/empty/"None" → "Unknown" AFTER filters (pre-DuckDB)
 for col in seg_cols:
     if col in dff.columns:
-        dff[col] = dff[col].fillna("Unknown").replace("", "Unknown").replace("None", "Unknown")
+        dff[col] = (
+            dff[col]
+            .fillna("Unknown")
+            .replace({"": "Unknown", "None": "Unknown"})
+        )
 
 # Included attributes and required ones
 include_cols = [c for c in seg_cols if include_flags.get(c, True)]
 required_cols = [col for col, vals in selections.items() if len(vals) > 0 and include_flags.get(col, True)]
 
-# ---------- DuckDB Grouping Sets ----------
+# ---------- DuckDB GROUPING SETS ----------
 con = duckdb.connect()
 con.register("t", dff)
 
@@ -161,11 +165,11 @@ if not sets:
         if attrs:
             sets.append("(" + f'"{attrs[0]}"' + ")")
         else:
-            sets.append("()")  # grand total
+            sets.append("()")  # grand total only
 
 grouping_sets_sql = ",\n".join(sets)
 
-# Top SKUs
+# Top SKUs (for per-segment purchase counts by SKU)
 top_skus = []
 if msku_col and msku_col in dff.columns:
     top_skus = con.execute(f'''
@@ -187,17 +191,22 @@ if top_skus:
         )
     sku_sums = ",\n  " + ",\n  ".join(pieces)
 
+# Depth (count of non-null attributes in the grouping)
 depth_expr = " + ".join([f"CASE WHEN \"{c}\" IS NULL THEN 0 ELSE 1 END" for c in attrs]) if attrs else "0"
 
+# Revenue / RPV aggregates
 revenue_sql = (
     "SUM(_REVENUE) AS revenue,\n  1.0 * SUM(_REVENUE) / NULLIF(COUNT(*),0) AS rpv"
     if revenue_col else
     "0.0 AS revenue,\n  0.0 AS rpv"
 )
 
+# Build SQL with conditional HAVING (only when grouped)
+having_clause = "HAVING COUNT(*) >= ?" if attrs else ""
+
 sql = f"""
 SELECT
-  {(", ".join([f'"{c}"' for c in attrs]) + "," if attrs else "" )}
+  {(", ".join([f'"{c}"' for c in attrs]) + "," if attrs else "" }
   COUNT(*) AS Visitors,
   SUM(_PURCHASE) AS Purchases,
   100.0 * SUM(_PURCHASE) / NULLIF(COUNT(*),0) AS conv_rate,
@@ -206,14 +215,15 @@ SELECT
   {sku_sums}
 FROM t
 {'GROUP BY GROUPING SETS (' + grouping_sets_sql + ')' if attrs else ''}
-HAVING COUNT(*) >= ?
+{having_clause}
 """
 
 # ---------- Ranked Conversion Table ----------
 st.subheader("🏆 Ranked Conversion Table")
 min_rows = st.number_input("Minimum Visitors per group", min_value=1, value=30, step=1)
 
-res = con.execute(sql, [int(min_rows)]).fetchdf()
+params = [int(min_rows)] if attrs else []
+res = con.execute(sql, params).fetchdf()
 
 sort_key_map = {
     "Conversion %": "conv_rate",
@@ -235,22 +245,26 @@ disp["Conversion %"] = disp["conv_rate"].map(lambda x: f"{x:.2f}%" if pd.notnull
 if "rpv" in disp.columns:
     disp["Revenue / Visitor"] = disp["rpv"].map(lambda x: f"${x:,.2f}" if pd.notnull(x) else "")
 
-# Collapse unknowns for display too
+# Ensure Unknown is displayed consistently
 for col in attrs_present:
     if col in disp.columns:
-        disp[col] = disp[col].fillna("Unknown").replace("", "Unknown").replace("None", "Unknown")
+        disp[col] = (
+            disp[col]
+            .fillna("Unknown")
+            .replace({"": "Unknown", "None": "Unknown"})
+        )
 
-table_cols = ["Rank","Visitors","Purchases","Conversion %","Depth"] + sku_cols + attrs_present
+table_cols = ["Rank", "Visitors", "Purchases", "Conversion %", "Depth"] + sku_cols + attrs_present
+
 def highlight_conv(s):
     return ["font-weight: bold" if s.name == "Conversion %" else "" for _ in s]
 
-styled = disp[table_cols].style.apply(highlight_conv, axis=0)
-st.dataframe(styled, use_container_width=True, hide_index=True)
+st.dataframe(disp[table_cols].style.apply(highlight_conv, axis=0), use_container_width=True, hide_index=True)
 
 # Download CSV
 csv_out = res.copy()
 csv_out.insert(0, "Rank", np.arange(1, len(csv_out) + 1))
-csv_cols = ["Rank","Visitors","Purchases","conv_rate","Depth","rpv","revenue"] + sku_cols + attrs_present
+csv_cols = ["Rank", "Visitors", "Purchases", "conv_rate", "Depth", "rpv", "revenue"] + sku_cols + attrs_present
 csv_out = csv_out[csv_cols].rename(columns={
     "conv_rate": "Conversion % (0-100)",
     "rpv": "Revenue / Visitor",
