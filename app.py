@@ -369,3 +369,61 @@ st.download_button(
   file_name="ranked_combinations.csv",
   mime="text/csv"
 )
+
+# ---------- Static attribute conversion tables (from full dataset; not affected by selections) ----------
+
+st.markdown("## Attribute Conversion Snapshots")
+
+@st.cache_data(show_spinner=False)
+def compute_attr_table(df_in: pd.DataFrame, col: str) -> pd.DataFrame:
+    """Return a small table: value, visitors, purchasers, conv% for one attribute.
+       Unknown/U/blank are removed from the output (but still counted overall)."""
+    tmp = df_in[[col, "_PURCHASE"]].copy()
+    # normalize labels
+    s = tmp[col].astype("string").str.strip()
+    s = s.fillna("Unknown").replace({"": "Unknown", "None": "Unknown", "U": "Unknown", "u": "Unknown"})
+    tmp["_VAL"] = s
+
+    # aggregate
+    size_df = tmp.groupby("_VAL").size().rename("Visitors").reset_index()
+    purch_df = tmp.groupby("_VAL")["_PURCHASE"].sum().rename("Purchasers").reset_index()
+    g = size_df.merge(purch_df, on="_VAL", how="left")
+
+    # drop Unknown-like rows from the display
+    g = g[~g["_VAL"].str.lower().isin(["unknown", "u", "none", ""])]
+
+    # conv%
+    g["Conversion %"] = 100.0 * g["Purchasers"] / g["Visitors"].replace(0, np.nan)
+
+    # tidy columns / sort
+    g = g.rename(columns={"_VAL": "Value"})
+    g = g[["Value", "Visitors", "Purchasers", "Conversion %"]].sort_values("Conversion %", ascending=False).reset_index(drop=True)
+
+    # cast types for clean display / CSV
+    g["Visitors"] = pd.to_numeric(g["Visitors"], errors="coerce").fillna(0).astype(int)
+    g["Purchasers"] = pd.to_numeric(g["Purchasers"], errors="coerce").fillna(0).astype(int)
+    return g
+
+def _style_attr(df_small: pd.DataFrame):
+    # bold Conversion %, center everything (global CSS may already center)
+    def _bold_conv(s):
+        return ["font-weight: bold" if s.name == "Conversion %" else "" for _ in s]
+    return (
+        df_small.style
+        .format({"Conversion %": "{:.2f}%"})
+        .apply(_bold_conv, axis=0)
+    )
+
+# decide order (reuse your desired_attr_labels; State was already excluded upstream)
+_attr_order = [lbl for lbl in ["Gender", "Age Range", "Homeowner", "Married", "Children",
+                               "Income Range", "Net Worth", "Credit Rating"]
+               if lbl in seg_map]  # use seg_map so we only show attributes that exist
+
+# lay out tables in a 3-column grid
+cols = st.columns(3, gap="small")
+for i, label in enumerate(_attr_order):
+    colname = seg_map[label]
+    tbl = compute_attr_table(df, colname)  # uses full df (static)
+    with cols[i % 3]:
+        st.markdown(f"**{label}**")
+        st.dataframe(_style_attr(tbl), use_container_width=True, hide_index=True)
