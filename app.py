@@ -110,7 +110,7 @@ seg_map = {
     "Homeowner":     resolve_col(df, "Home_Owner"),
     "Married":       resolve_col(df, "Married"),
     "Children":      resolve_col(df, "Children"),
-    "State":         state_col,   # <-- keep this line
+    "State":         resolve_col(df, "State")   # <-- keep this line
 }
 # keep only found columns
 seg_map = {label: col for label, col in seg_map.items() if col is not None}
