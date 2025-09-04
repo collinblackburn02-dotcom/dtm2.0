@@ -94,35 +94,41 @@ seg_map = {label: col for label, col in seg_map.items() if col is not None}
 seg_cols = list(seg_map.values())
 
 # ---------- Filters + Include toggles ----------
+# Always start from a working copy
+dff = df.copy()
+
+# (Hidden) global filters UI — only renders if you flip the flag to True
 if SHOW_GLOBAL_FILTERS:
-  with st.expander("🔎 Filters", expanded=False):
-      dff = df.copy()
+    with st.expander("🔎 Filters", expanded=False):
+        # Treat 'U' as missing for Gender and Credit before collapsing
+        for label, col in seg_map.items():
+            if label in ("Gender", "Credit Rating") and col in dff.columns:
+                mask_u = dff[col].astype(str).str.upper().str.strip().eq("U")
+                dff.loc[mask_u, col] = pd.NA
 
-    # Treat 'U' as missing for Gender and Credit before collapsing
-  for label, col in seg_map.items():
-        if label in ("Gender", "Credit Rating") and col in dff.columns:
-            mask_u = dff[col].astype(str).str.upper().str.strip().eq("U")
-            dff.loc[mask_u, col] = pd.NA
+        # Date filter (only if DATE exists)
+        if not pd.isna(dff["_DATE"]).all():
+            mind = pd.to_datetime(dff["_DATE"].dropna().min())
+            maxd = pd.to_datetime(dff["_DATE"].dropna().max())
+            c1, c2 = st.columns(2)
+            with c1:
+                start_end = st.date_input("Date range", (mind.date(), maxd.date()))
+            with c2:
+                include_undated = st.checkbox("Include no-date rows", value=True)
 
-    # Date filter (only if DATE exists)
-  if not pd.isna(dff["_DATE"]).all():
-        mind, maxd = pd.to_datetime(dff["_DATE"].dropna().min()), pd.to_datetime(dff["_DATE"].dropna().max())
-        c1, c2 = st.columns(2)
-      with c1:
-            start_end = st.date_input("Date range", (mind.date(), maxd.date()))
-      with c2:
-            include_undated = st.checkbox("Include no-date rows", value=True)
-      if isinstance(start_end, (list, tuple)) and len(start_end) == 2:
-            start, end = start_end
-            mask = dff["_DATE"].between(pd.to_datetime(start), pd.to_datetime(end))
-          if include_undated:
-                mask = mask | dff["_DATE"].isna()
-            dff = dff[mask]
+            if isinstance(start_end, (list, tuple)) and len(start_end) == 2:
+                start, end = start_end
+                mask = dff["_DATE"].between(pd.to_datetime(start), pd.to_datetime(end))
+                if include_undated:
+                    mask = mask | dff["_DATE"].isna()
+                dff = dff[mask]
 
-    # SKU contains filter
-  sku_search = st.text_input("Most Recent SKU contains (optional)")
-  if msku_col and sku_search:
-      dff = dff[dff[msku_col].astype(str).str.contains(sku_search, case=False, na=False)]
+        # SKU contains filter
+        if msku_col:
+            sku_search = st.text_input("Most Recent SKU contains (optional)")
+            if sku_search:
+                dff = dff[dff[msku_col].astype(str).str.contains(sku_search, case=False, na=False)]
+
 
 # Attribute value filters + Include checkboxes (all included by default)
 selections = {}
