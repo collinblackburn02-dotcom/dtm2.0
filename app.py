@@ -17,7 +17,7 @@ with st.sidebar:
         ["Conversion %", "Purchases", "Visitors", "Revenue / Visitor"],
         index=0
     )
-    # Max combo depth: now up to 5, default 5
+    # Max combo depth: up to 5, default 5
     max_depth = st.slider("Max combo depth", 1, 5, 5, 1)
     top_n = st.slider("Top N", 10, 1000, 50, 10)
     # Min visitors: default 500, min allowed 50
@@ -52,7 +52,7 @@ if purchase_col is None:
     st.error("Missing Purchase column.")
     st.stop()
 
-# Prepare core numeric columns
+# Core numeric columns
 df["_PURCHASE"] = pd.to_numeric(df[purchase_col], errors="coerce").fillna(0).astype(int)
 df["_DATE"] = to_datetime_series(df[date_col]) if date_col else pd.NaT
 df["_REVENUE"] = pd.to_numeric(df[revenue_col], errors="coerce").fillna(0.0) if revenue_col else 0.0
@@ -72,7 +72,7 @@ seg_map = {
 seg_map = {label: col for label, col in seg_map.items() if col is not None}
 seg_cols = list(seg_map.values())
 
-# ---------- Filters ----------
+# ---------- Filters + Include toggles ----------
 with st.expander("🔎 Filters", expanded=True):
     dff = df.copy()
 
@@ -102,31 +102,33 @@ with st.expander("🔎 Filters", expanded=True):
     if msku_col and sku_search:
         dff = dff[dff[msku_col].astype(str).str.contains(sku_search, case=False, na=False)]
 
-    # Attribute value filters
+    # Attribute value filters + Include checkboxes (all included by default)
     selections = {}
+    include_flags = {}  # label -> bool
     if seg_cols:
-        st.markdown("**Attribute filters**")
+        st.markdown("**Attributes**")
         cols = st.columns(3)
         idx = 0
         for label, col in seg_map.items():
             with cols[idx % 3]:
+                include_flags[label] = st.checkbox(f"{label} — Include", value=True, key=f"include_{label}")
                 values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
                 sel = st.multiselect(label, options=values, default=[], help="Empty = All")
                 if sel:
                     selections[col] = sel
             idx += 1
+        # Apply value filters
         for col, vals in selections.items():
             dff = dff[dff[col].isin(vals)]
 
-    # Choose attributes to use in grouping
-    st.markdown("**Attributes to include in grouping**")
-    default_group_attrs = list(seg_map.keys())  # friendly labels
-    chosen_labels = st.multiselect("Group by these attributes (combinations up to Max Depth):",
-                                   options=list(seg_map.keys()),
-                                   default=default_group_attrs)
-    group_attr_cols = [seg_map[lbl] for lbl in chosen_labels]
+# Build the list of attribute columns to group by
+#  - Start from "Include" toggles
+group_attr_cols = [seg_map[lbl] for lbl, inc in include_flags.items() if inc]
+#  - Any attribute with a value filter becomes REQUIRED in all combos
+required_raw_cols = list(selections.keys())
+group_attr_cols = sorted(set(group_attr_cols).union(required_raw_cols))
 
-    st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
+st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
 
 # Collapse NaN/empty/"None"/"U" → "Unknown" AFTER filters (so groupings are stable)
 for col in seg_cols:
@@ -160,13 +162,27 @@ if top_skus:
         sku_ind_cols[sku] = colname
         dff[colname] = ((dff[msku_col].astype(str).str.strip() == sku) & (dff["_PURCHASE"] == 1)).astype(int)
 
-# ---------- Build all grouping combinations ----------
+# ---------- Build all grouping combinations (enforce required attributes) ----------
 attrs_available = [c for c in group_attr_cols if c in dff.columns]
+req_set = set(required_raw_cols)  # raw col names with value filters
 combo_sets = []
-for d in range(1, max_depth + 1):
-    combo_sets.extend(list(combinations(attrs_available, d)))
-if not combo_sets:
+
+if len(attrs_available) == 0:
     combo_sets = [()]  # grand total
+else:
+    # Depth must be at least the number of required attrs
+    min_depth = max(1, len(req_set))
+    max_d = max(max_depth, len(req_set))
+    for d in range(min_depth, max_d + 1):
+        for s in combinations(attrs_available, d):
+            if req_set.issubset(s):
+                combo_sets.append(list(s))
+    if not combo_sets:
+        # Fallback: just require-set itself if possible
+        if req_set.issubset(set(attrs_available)):
+            combo_sets = [list(req_set)]
+        else:
+            combo_sets = [()]  # extreme fallback
 
 # ---------- Aggregate for each combination ----------
 rows = []
@@ -243,6 +259,7 @@ for c in ["Visitors", "Purchases", "Depth"]:
 for c in sku_cols:
     if c in disp.columns:
         disp[c] = pd.to_numeric(disp[c], errors="coerce").fillna(0).astype(int)
+        disp[c] = disp[c].replace({0: ""})  # blank out 0s for SKUs
 
 # Pretty formats
 disp["Conversion %"] = disp["conv_rate"].map(lambda x: f"{x:.2f}%" if pd.notnull(x) else "")
@@ -252,32 +269,54 @@ if "rpv" in disp.columns:
 # Rename attribute columns to friendly labels for display
 disp = disp.rename(columns=friendly_attr)
 
+# DISPLAY-ONLY: replace None/NaN and the literal "None" with ""
+attr_display_cols = [
+    lbl for lbl in
+    ["Gender", "Age Range", "Homeowner", "Married", "Children", "Income Range", "Net Worth", "Credit Rating"]
+    if lbl in disp.columns
+]
+for c in attr_display_cols:
+    s = disp[c].astype(object)
+    mask = s.isna() | s.astype(str).str.strip().str.lower().eq("none")
+    disp[c] = s.mask(mask, "")
+
 # Insert Rank
 disp.insert(0, "Rank", np.arange(1, len(disp) + 1))
 
-# ---- Column order (now includes Purchasers + RPV in the table)
+# ---- Column order (Purchasers + RPV in the table; SKUs on the right)
 desired_attr_labels = [
     "Gender", "Age Range", "Homeowner", "Married", "Children",
     "Income Range", "Net Worth", "Credit Rating"
 ]
-# include only those actually present
 middle_cols = [lbl for lbl in desired_attr_labels if lbl in disp.columns]
 right_cols = [c for c in sku_cols if c in disp.columns]  # SKUs to the right
 
-# Add Purchasers (display name) and Revenue / Visitor to the table
-disp["Purchasers"] = disp["Purchases"]  # display alias
+# Add Purchasers (display alias)
+disp["Purchasers"] = disp["Purchases"]
 left_cols = ["Rank", "Visitors", "Purchasers", "Conversion %", "Revenue / Visitor", "Depth"]
 
 # Some groups may lack attributes; keep any extra attribute cols at the end of middle section
 extra_attrs = [c for c in friendly_attr.values() if c in disp.columns and c not in middle_cols]
 
-table_cols = left_cols + middle_cols + extra_attrs + right_cols
-table_cols = [c for c in table_cols if c in disp.columns]  # safety
+table_cols = [c for c in left_cols + middle_cols + extra_attrs + right_cols if c in disp.columns]
 
-def highlight_conv(s):
-    return ["font-weight: bold" if s.name == "Conversion %" else "" for _ in s]
+# Bold the column that matches the selected sort metric
+display_metric_map = {
+    "Conversion %": "Conversion %",
+    "Purchases": "Purchasers",
+    "Visitors": "Visitors",
+    "Revenue / Visitor": "Revenue / Visitor",
+}
+selected_display_metric = display_metric_map.get(metric_choice, "Conversion %")
 
-st.dataframe(disp[table_cols].style.apply(highlight_conv, axis=0), use_container_width=True, hide_index=True)
+def highlight_selected_metric(s):
+    return ["font-weight: bold" if s.name == selected_display_metric else "" for _ in s]
+
+st.dataframe(
+    disp[table_cols].style.apply(highlight_selected_metric, axis=0),
+    use_container_width=True,
+    hide_index=True
+)
 
 # ---------- Download CSV ----------
 csv_out = res.copy()
@@ -310,4 +349,3 @@ st.download_button(
     file_name="ranked_combinations.csv",
     mime="text/csv"
 )
-
