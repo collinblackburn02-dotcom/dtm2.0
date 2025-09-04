@@ -102,29 +102,28 @@ with st.expander("🔎 Filters", expanded=True):
     if msku_col and sku_search:
         dff = dff[dff[msku_col].astype(str).str.contains(sku_search, case=False, na=False)]
 
-    # Attribute value filters
-    selections = {}
-    if seg_cols:
-        st.markdown("**Attribute filters**")
-        cols = st.columns(3)
-        idx = 0
-        for label, col in seg_map.items():
-            with cols[idx % 3]:
-                values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
-                sel = st.multiselect(label, options=values, default=[], help="Empty = All")
-                if sel:
-                    selections[col] = sel
-            idx += 1
-        for col, vals in selections.items():
-            dff = dff[dff[col].isin(vals)]
+    # Attribute value filters + Include checkboxes
+selections = {}
+include_flags = {}  # label -> bool
+if seg_cols:
+    st.markdown("**Attributes**")
+    cols = st.columns(3)
+    idx = 0
+    for label, col in seg_map.items():
+        with cols[idx % 3]:
+            include_flags[label] = st.checkbox(f"{label} — Include", value=True, key=f"include_{label}")
+            values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
+            sel = st.multiselect(label, options=values, default=[], help="Empty = All")
+            if sel:
+                selections[col] = sel
+        idx += 1
+    # Apply value filters
+    for col, vals in selections.items():
+        dff = dff[dff[col].isin(vals)]
 
-    # Choose attributes to use in grouping
-    st.markdown("**Attributes to include in grouping**")
-    default_group_attrs = list(seg_map.keys())  # friendly labels
-    chosen_labels = st.multiselect("Group by these attributes (combinations up to Max Depth):",
-                                   options=list(seg_map.keys()),
-                                   default=default_group_attrs)
-    group_attr_cols = [seg_map[lbl] for lbl in chosen_labels]
+# Build the list of attribute columns to actually group by, based on Include checkboxes
+group_attr_cols = [seg_map[lbl] for lbl, inc in include_flags.items() if inc]
+
 
     st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
 
@@ -244,6 +243,10 @@ for c in sku_cols:
     if c in disp.columns:
         disp[c] = pd.to_numeric(disp[c], errors="coerce").fillna(0).astype(int)
 
+for c in sku_cols:
+    if c in disp.columns:
+        disp[c] = disp[c].replace({0: ""})
+
 # Pretty formats
 disp["Conversion %"] = disp["conv_rate"].map(lambda x: f"{x:.2f}%" if pd.notnull(x) else "")
 if "rpv" in disp.columns:
@@ -274,10 +277,27 @@ extra_attrs = [c for c in friendly_attr.values() if c in disp.columns and c not 
 table_cols = left_cols + middle_cols + extra_attrs + right_cols
 table_cols = [c for c in table_cols if c in disp.columns]  # safety
 
-def highlight_conv(s):
-    return ["font-weight: bold" if s.name == "Conversion %" else "" for _ in s]
+# Bold the column that matches the selected sort metric
+display_metric_map = {
+    "Conversion %": "Conversion %",
+    "Purchases": "Purchasers",
+    "Visitors": "Visitors",
+    "Revenue / Visitor": "Revenue / Visitor",
+}
+selected_display_metric = display_metric_map.get(metric_choice, "Conversion %")
 
-st.dataframe(disp[table_cols].style.apply(highlight_conv, axis=0), use_container_width=True, hide_index=True)
+def highlight_selected_metric(s):
+    return ["font-weight: bold" if s.name == selected_display_metric else "" for _ in s]
+
+
+st.dataframe(
+    disp[table_cols]
+    .style
+    .apply(highlight_selected_metric, axis=0)   # dynamic bolding
+    .applymap(lambda v: "color: white" if isinstance(v, str) and v.strip().lower() == "none" else ""),  # hide 'none'
+    use_container_width=True,
+    hide_index=True
+)
 
 # ---------- Download CSV ----------
 csv_out = res.copy()
