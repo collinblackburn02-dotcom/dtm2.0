@@ -63,7 +63,7 @@ st.markdown("""
 
 # -------------------- Sidebar --------------------
 with st.sidebar:
-  st.image(LOGO_URL, use_column_width=True)
+  st.image(LOGO_URL, use_container_width=True)
   st.markdown("---")
   metric_choice = st.radio(
       "Sort metric", ["Conversion %", "Purchases", "Visitors", "Revenue / Visitor"], index=0
