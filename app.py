@@ -99,7 +99,7 @@ if SHOW_GLOBAL_FILTERS:
       dff = df.copy()
 
     # Treat 'U' as missing for Gender and Credit before collapsing
-    for label, col in seg_map.items():
+  for label, col in seg_map.items():
         if label in ("Gender", "Credit Rating") and col in dff.columns:
             mask_u = dff[col].astype(str).str.upper().str.strip().eq("U")
             dff.loc[mask_u, col] = pd.NA
