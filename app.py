@@ -187,13 +187,13 @@ if top_skus:
     pieces = []
     for sku in top_skus:
         s_escaped = sku.replace("'", "''")
-        # Keep "SKU:<name>" in SQL; we will rename to "<name>" after fetch
+        # Keep "SKU:<name>" in SQL; rename to "<name>" after fetch
         pieces.append(
             f"SUM(CASE WHEN \"{msku_col}\"='{s_escaped}' AND _PURCHASE=1 THEN 1 ELSE 0 END) AS \"SKU:{s_escaped}\""
         )
     sku_sums = ",\n  " + ",\n  ".join(pieces)
 
-# Depth (count of non-null attributes in the grouping)
+# Depth across selected attributes
 depth_expr = " + ".join([f"CASE WHEN \"{c}\" IS NULL THEN 0 ELSE 1 END" for c in attrs]) if attrs else "0"
 
 # Revenue / RPV aggregates
@@ -203,12 +203,10 @@ revenue_sql = (
     "0.0 AS revenue,\n  0.0 AS rpv"
 )
 
-# Build SQL with conditional HAVING (only when grouped)
-having_clause = "HAVING COUNT(*) >= ?" if attrs else ""
-
+# NOTE: No HAVING here (we filter by min_rows later)
 sql = f"""
 SELECT
-  {(", ".join([f'"{c}"' for c in attrs]) + "," if attrs else "" )}
+  {(", ".join([f'"{c}"' for c in attrs]) + "," if attrs else "" }
   COUNT(*) AS Visitors,
   SUM(_PURCHASE) AS Purchases,
   100.0 * SUM(_PURCHASE) / NULLIF(COUNT(*),0) AS conv_rate,
@@ -217,52 +215,60 @@ SELECT
   {sku_sums}
 FROM t
 {'GROUP BY GROUPING SETS (' + grouping_sets_sql + ')' if attrs else ''}
-{having_clause}
 """
 
 # ---------- Ranked Conversion Table ----------
 st.subheader("🏆 Ranked Conversion Table")
 min_rows = st.number_input("Minimum Visitors per group", min_value=1, value=30, step=1)
 
-params = [int(min_rows)] if attrs else []
-res = con.execute(sql, params).fetchdf()
+# Run query (no params needed—no HAVING)
+res = con.execute(sql).fetchdf()
 
-# ---- Rename SKU:* columns to just the SKU name (for both display & CSV)
+# Rename SKU:* columns to bare SKU names (for display & CSV)
 sku_prefixed_cols = [c for c in res.columns if str(c).startswith("SKU:")]
 sku_rename = {c: c.split("SKU:", 1)[1] for c in sku_prefixed_cols}
 res = res.rename(columns=sku_rename)
 
-# ---- DEDUPLICATE CORRECTLY (by attributes only), aggregate counts, then recompute metrics
+# ---- DEDUPLICATE by attributes, SUM counts, then recompute metrics
 if attrs:
     attr_cols = [c for c in attrs if c in res.columns]
-    # Identify SKU columns after rename
-    sku_cols = [sku_rename[c] for c in sku_prefixed_cols if sku_rename[c] in res.columns]
+else:
+    attr_cols = []  # grand total only
 
-    agg_dict = {
-        "Visitors": "sum",
-        "Purchases": "sum",
-        "revenue": "sum" if "revenue" in res.columns else "sum",
-    }
-    # Sum each SKU count column
-    for c in sku_cols:
-        agg_dict[c] = "sum"
+# Identify SKU columns after rename
+sku_cols = [sku_rename[c] for c in sku_prefixed_cols if sku_rename[c] in res.columns]
 
-    # Group by attribute columns only
+agg_dict = {"Visitors": "sum", "Purchases": "sum"}
+if "revenue" in res.columns:
+    agg_dict["revenue"] = "sum"
+for c in sku_cols:
+    agg_dict[c] = "sum"
+
+if len(attr_cols) > 0:
     grouped = res.groupby(attr_cols, as_index=False).agg(agg_dict)
+else:
+    # No attributes selected: just aggregate whole table to a single row
+    grouped = res.agg(agg_dict)
+    if isinstance(grouped, pd.Series):
+        grouped = grouped.to_frame().T
+    # keep Depth = 0 in this case
+    grouped["Depth"] = 0
 
-    # Recompute metrics from aggregated totals
-    grouped["conv_rate"] = 100.0 * grouped["Purchases"] / grouped["Visitors"].replace(0, np.nan)
-    if "revenue" in grouped.columns:
-        grouped["rpv"] = grouped["revenue"] / grouped["Visitors"].replace(0, np.nan)
-    else:
-        grouped["rpv"] = 0.0
+# Recompute metrics
+grouped["conv_rate"] = 100.0 * grouped["Purchases"] / grouped["Visitors"].replace(0, np.nan)
+if "revenue" in grouped.columns:
+    grouped["rpv"] = grouped["revenue"] / grouped["Visitors"].replace(0, np.nan)
+else:
+    grouped["rpv"] = 0.0
 
-    # Set Depth consistently to the number of grouping attributes
+# Ensure Depth is the number of grouping attributes when attrs exist
+if len(attr_cols) > 0:
     grouped["Depth"] = len(attr_cols)
 
-    res = grouped
+# ---- Apply min_rows filter AFTER dedup/aggregation
+grouped = grouped[grouped["Visitors"] >= int(min_rows)]
 
-# ---- Sort by selected metric and limit
+# ---- Sort & limit
 sort_key_map = {
     "Conversion %": "conv_rate",
     "Purchases": "Purchases",
@@ -270,23 +276,21 @@ sort_key_map = {
     "Revenue / Visitor": "rpv",
 }
 sort_key = sort_key_map[metric_choice]
-res = res.sort_values(sort_key, ascending=False).head(top_n).reset_index(drop=True)
+res = grouped.sort_values(sort_key, ascending=False).head(top_n).reset_index(drop=True)
 
 # ---- Prepare display data
-# Attribute columns present (original df colnames)
-attrs_present = [c for c in (attrs if attrs else []) if c in res.columns]
-# SKU columns (already bare names)
-all_sku_cols = [c for c in res.columns if c not in set(attrs_present + ["Visitors","Purchases","conv_rate","Depth","rpv","revenue"])]
+attrs_present = [c for c in attr_cols if c in res.columns]
+all_sku_cols = [c for c in sku_cols if c in res.columns]
 
 disp = res.copy()
 disp.insert(0, "Rank", np.arange(1, len(disp) + 1))
 
-# Pretty formats
+# Formats
 disp["Conversion %"] = disp["conv_rate"].map(lambda x: f"{x:.2f}%" if pd.notnull(x) else "")
 if "rpv" in disp.columns:
     disp["Revenue / Visitor"] = disp["rpv"].map(lambda x: f"${x:,.2f}" if pd.notnull(x) else "")
 
-# Integers for counts (no .0)
+# Integers for counts
 for col in ["Visitors", "Purchases", "Depth"]:
     if col in disp.columns:
         disp[col] = pd.to_numeric(disp[col], errors="coerce").fillna(0).astype(int)
@@ -294,14 +298,12 @@ for col in all_sku_cols:
     if col in disp.columns:
         disp[col] = pd.to_numeric(disp[col], errors="coerce").fillna(0).astype(int)
 
-# Ensure Unknown displayed consistently
+# Ensure Unknown displays consistently
 for col in attrs_present:
     if col in disp.columns:
         disp[col] = disp[col].fillna("Unknown").replace({"": "Unknown", "None": "Unknown"})
 
-# ---- Column order
-# Rank, Visitors, Purchases, Conversion %, Depth, Gender, Age Range, Homeowner, Married,
-# Children, Income Range, Net Worth, Credit Rating, then SKUs
+# ---- Column order (SKUs on the far right)
 desired_attr_labels = [
     "Gender", "Age Range", "Homeowner", "Married", "Children",
     "Income Range", "Net Worth", "Credit Rating"
@@ -323,7 +325,7 @@ st.dataframe(disp[table_cols].style.apply(highlight_conv, axis=0), use_container
 csv_out = res.copy()
 csv_out.insert(0, "Rank", np.arange(1, len(csv_out) + 1))
 
-# Build CSV column order using the same display order (numeric metrics stay numeric)
+# Same order as display (metrics remain numeric)
 csv_cols = ["Rank", "Visitors", "Purchases", "conv_rate", "Depth"] + desired_attr_cols + right_cols
 csv_out = csv_out[csv_cols].rename(columns={
     "conv_rate": "Conversion % (0-100)"
