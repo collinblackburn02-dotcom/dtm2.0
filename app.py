@@ -4,11 +4,22 @@ import numpy as np
 from itertools import combinations
 from utils import resolve_col
 
+# -------------------- Page & Brand --------------------
 st.set_page_config(page_title="Heavenly Health — Customer Insights", layout="wide")
-st.title("✨ Heavenly Health — Customer Insights")
-st.caption("")
 
-# --- Heavenly Heat look & feel ---
+# Assets (RAW GitHub URLs)
+DATA_URL = "https://raw.githubusercontent.com/collinblackburn02-dotcom/dtm2.0/main/Copy%20of%20DAN_HHS%20-%20Copy%20of%20MergedForDashboard.csv"
+LOGO_URL = "https://raw.githubusercontent.com/collinblackburn02-dotcom/dtm2.0/main/Heavenly%20Health%20Logo.jpg"
+
+# Feature flags
+SHOW_GLOBAL_FILTERS = False     # hidden for now
+EXCLUDE_STATE = True            # hide/ignore State everywhere
+
+# Header
+st.title("✨ Heavenly Health — Customer Insights")
+st.caption("Fast, ranked customer segments (Pandas-only, robust and simple).")
+
+# --- Brand CSS ---
 st.markdown("""
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Playfair+Display:wght@700&display=swap');
@@ -21,519 +32,340 @@ st.markdown("""
     --accent2:#C67A57;      /* copper */
     --muted:#8D8379;
   }
-
-  html, body, [data-testid="stAppViewContainer"]{
-    background: var(--bg);
-    color: var(--ink);
-    font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  html, body, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] > .main {
+    background: var(--bg) !important;
+    color: var(--ink) !important;
+    font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif !important;
   }
+  h1,h2,h3 { font-family: 'Playfair Display', serif !important; color: var(--accent) !important; letter-spacing:.2px; }
+  [data-testid="stSidebar"] { background: var(--panel) !important; border-right: 1px solid #ece3da !important; }
 
-  h1, h2, h3 { font-family: 'Playfair Display', serif; color: var(--accent); letter-spacing: .2px; }
-  [data-testid="stSidebar"] { background: var(--panel); border-right: 1px solid #ece3da; }
+  /* Controls tint */
+  .stButton > button { background: var(--accent) !important; color: #fff !important; border:0 !important; }
+  .stButton > button:hover { background:#5a3326 !important; }
+  .stRadio [role="radio"][aria-checked="true"] { color: var(--accent) !important; }
+  .stMultiSelect [data-baseweb="tag"] { background: #f2e7df !important; }
+  .stMultiSelect [data-baseweb="select"] > div { border-color: #e8ddd3 !important; }
 
-  /* Buttons/radios/sliders tint */
-  .stButton > button { background: var(--accent); color: #fff; border: 0; }
-  .stButton > button:hover { background: #5a3326; }
-
-  /* Multi-select pills + focus */
-  .stMultiSelect [data-baseweb="tag"] { background: #f2e7df; }
-  .stMultiSelect [data-baseweb="select"] > div { border-color: #e8ddd3; }
-  .stRadio [role="radio"][aria-checked="true"] { color: var(--accent); }
-</style>
-""", unsafe_allow_html=True)
-
-
-# Assets (RAW GitHub URLs)
-DATA_URL = "https://raw.githubusercontent.com/collinblackburn02-dotcom/dtm2.0/main/Copy%20of%20DAN_HHS%20-%20Copy%20of%20MergedForDashboard.csv"
-LOGO_URL = "https://raw.githubusercontent.com/collinblackburn02-dotcom/dtm2.0/main/Heavenly%20Health%20Logo.jpg"
-
-# Toggle to show/hide the top (global) filters UI
-SHOW_GLOBAL_FILTERS = False   # set to True later if you want to expose them again
-
-
-# --- Attribute cards: alignment + compact fixed heights ---
-st.markdown("""
-<style>
-  .attr-card   { display:flex; flex-direction:column; gap:1px; min-height:4px; margin-bottom:0px; }
+  /* Attribute cards */
+  .attr-card   { display:flex; flex-direction:column; gap:4px; min-height:110px; margin-bottom:12px; }
   .attr-header { display:flex; align-items:center; justify-content:space-between; }
   .attr-title  { font-weight:700; font-size:1.08rem; margin:0; }
-  /* Align Streamlit checkbox inline with the title */
   div[data-testid="stCheckbox"] { margin:0; display:flex; align-items:center; justify-content:flex-end; }
-  /* erve just enough space for one multiselect row so all cards line up */
-  .attr-body   { min-height:2px; display:flex; align-items:center; }
-</style>
-""", unsafe_allow_html=True)
+  .attr-body   { min-height:44px; display:flex; align-items:center; }
 
-# Center all headers + cells inside st.dataframe
-st.markdown("""
-<style>
-  [data-testid="stDataFrame"] th, 
-  [data-testid="stDataFrame"] td {
-    text-align: center !important;
-    vertical-align: middle !important;
+  /* Center st.dataframe headers + cells */
+  [data-testid="stDataFrame"] th, [data-testid="stDataFrame"] td {
+    text-align:center !important; vertical-align:middle !important;
   }
 </style>
 """, unsafe_allow_html=True)
 
-
-
-
-
-
-# ---------- Sidebar ----------
+# -------------------- Sidebar --------------------
 with st.sidebar:
-    st.image(LOGO_URL, use_column_width=True)
-    st.markdown("---")
-    metric_choice = st.radio(
-        "Sort metric",
-        ["Conversion %", "Purchases", "Visitors", "Revenue / Visitor"],
-        index=0
-    )
-    # Max combo depth: up to 5, default 5
-    max_depth = st.slider("Max combo depth", 1, 5, 5, 1)
-    top_n = st.slider("Top N", 10, 1000, 50, 10)
-    # Min visitors: default 500, min allowed 50
-    min_rows = st.number_input("Minimum Visitors per group", min_value=50, value=500, step=50)
+  st.image(LOGO_URL, use_column_width=True)
+  st.markdown("---")
+  metric_choice = st.radio(
+      "Sort metric", ["Conversion %", "Purchases", "Visitors", "Revenue / Visitor"], index=0
+  )
+  max_depth = st.slider("Max combo depth", 1, 5, 5, 1)
+  top_n = st.slider("Top N", 10, 1000, 50, 10)
+  min_rows = st.number_input("Minimum Visitors per group", min_value=50, value=500, step=50)
 
+# -------------------- Data --------------------
 @st.cache_data(show_spinner=False)
-def load_df(file):
-    df = pd.read_csv(file)
-    df.columns = [str(c).strip() for c in df.columns]
-    return df
+def load_df(path_or_url: str) -> pd.DataFrame:
+  df = pd.read_csv(path_or_url)
+  df.columns = [str(c).strip() for c in df.columns]
+  return df
 
 def to_datetime_series(s: pd.Series) -> pd.Series:
-    try:
-        return pd.to_datetime(s, errors="coerce")
-    except Exception:
-        return pd.to_datetime(pd.Series([None]*len(s)))
+  try:
+    return pd.to_datetime(s, errors="coerce")
+  except Exception:
+    return pd.to_datetime(pd.Series([None] * len(s)))
 
-# ---------- Load Data ----------
 df = load_df(DATA_URL)
 
-# Resolve key columns (case-insensitive)
+# Resolve key columns
 purchase_col = resolve_col(df, "Purchase")
-date_col     = resolve_col(df, "DATE")        # optional
+date_col     = resolve_col(df, "DATE")
 msku_col     = resolve_col(df, "SKU")
 revenue_col  = resolve_col(df, "Revenue")
+
+# State (we'll ignore if EXCLUDE_STATE=True)
 state_col = (
-    resolve_col(df, "State")
-    or resolve_col(df, "US_STATE")
-    or resolve_col(df, "STATE_CODE")
-    or resolve_col(df, "STATE_ABBR")
-    or resolve_col(df, "Personal_State")
+  resolve_col(df, "State")
+  or resolve_col(df, "US_STATE")
+  or resolve_col(df, "STATE_CODE")
+  or resolve_col(df, "STATE_ABBR")
+  or resolve_col(df, "Personal_State")
 )
 
-EXCLUDE_STATE = True
-
-
 if purchase_col is None:
-    st.error("Missing Purchase column.")
-    st.stop()
+  st.error("Missing Purchase column."); st.stop()
 
 # Core numeric columns
 df["_PURCHASE"] = pd.to_numeric(df[purchase_col], errors="coerce").fillna(0).astype(int)
 df["_DATE"] = to_datetime_series(df[date_col]) if date_col else pd.NaT
 df["_REVENUE"] = pd.to_numeric(df[revenue_col], errors="coerce").fillna(0.0) if revenue_col else 0.0
 
-# ---------- Segmentation Attributes ----------
+# -------------------- Segmentation attributes --------------------
 seg_map = {
-    "Age Range":     resolve_col(df, "Age_Range"),
-    "Income Range":  resolve_col(df, "Income_Range"),
-    "Net Worth":     resolve_col(df, "Net_Worth"),
-    "Credit Rating": resolve_col(df, "Credit_Rating"),
-    "Gender":        resolve_col(df, "Gender"),
-    "Homeowner":     resolve_col(df, "Home_Owner"),
-    "Married":       resolve_col(df, "Married"),
-    "Children":      resolve_col(df, "Children"),
-    "State":         resolve_col(df, "State")   # <-- keep this line
+  "Age Range":     resolve_col(df, "Age_Range"),
+  "Income Range":  resolve_col(df, "Income_Range"),
+  "Net Worth":     resolve_col(df, "Net_Worth"),
+  "Credit Rating": resolve_col(df, "Credit_Rating"),
+  "Gender":        resolve_col(df, "Gender"),
+  "Homeowner":     resolve_col(df, "Home_Owner"),
+  "Married":       resolve_col(df, "Married"),
+  "Children":      resolve_col(df, "Children"),
+  "State":         state_col,
 }
 # keep only found columns
 seg_map = {label: col for label, col in seg_map.items() if col is not None}
 seg_cols = list(seg_map.values())
 
-# 🚫 Drop State everywhere when flag is on
+# Drop State everywhere (flag)
 if EXCLUDE_STATE and "State" in seg_map:
-    del seg_map["State"]
-    state_col = None
-  
+  del seg_map["State"]
+  state_col = None
+  seg_cols = list(seg_map.values())
 
-
-# ---------- Filters + Include toggles ----------
-# Always start from a working copy
+# -------------------- Filters (global hidden) --------------------
 dff = df.copy()
-
-# (Hidden) global filters UI — only renders if you flip the flag to True
 if SHOW_GLOBAL_FILTERS:
-    with st.expander("🔎 Filters", expanded=False):
-        # Treat 'U' as missing for Gender and Credit before collapsing
-        for label, col in seg_map.items():
-            if label in ("Gender", "Credit Rating") and col in dff.columns:
-                mask_u = dff[col].astype(str).str.upper().str.strip().eq("U")
-                dff.loc[mask_u, col] = pd.NA
+  with st.expander("🔎 Filters", expanded=False):
+    # Date and SKU filters would go here (kept for future)
+    pass
 
-        # Date filter (only if DATE exists)
-        if not pd.isna(dff["_DATE"]).all():
-            mind = pd.to_datetime(dff["_DATE"].dropna().min())
-            maxd = pd.to_datetime(dff["_DATE"].dropna().max())
-            c1, c2 = st.columns(2)
-            with c1:
-                start_end = st.date_input("Date range", (mind.date(), maxd.date()))
-            with c2:
-                include_undated = st.checkbox("Include no-date rows", value=True)
-
-            if isinstance(start_end, (list, tuple)) and len(start_end) == 2:
-                start, end = start_end
-                mask = dff["_DATE"].between(pd.to_datetime(start), pd.to_datetime(end))
-                if include_undated:
-                    mask = mask | dff["_DATE"].isna()
-                dff = dff[mask]
-
-        # SKU contains filter
-        if msku_col:
-            sku_search = st.text_input("Most Recent SKU contains (optional)")
-            if sku_search:
-                dff = dff[dff[msku_col].astype(str).str.contains(sku_search, case=False, na=False)]
-
-
-# Attribute value filters + Include checkboxes (all included by default)
+# -------------------- Attribute UI --------------------
 selections = {}
-include_flags = {}  # label -> bool
+include_flags = {}
 if seg_cols:
-    st.markdown("**Attributes**")
-    cols = st.columns(3, gap="small")
-    idx = 0
-    for label, col in seg_map.items():
-        with cols[idx % 3]:
-            # Card wrapper (fixed height)
-            st.markdown('<div class="attr-card">', unsafe_allow_html=True)
+  st.markdown("**Attributes**")
+  cols = st.columns(3, gap="small")
+  idx = 0
+  for label, col in seg_map.items():
+    with cols[idx % 3]:
+      st.markdown('<div class="attr-card">', unsafe_allow_html=True)
 
-            # Header row: title (left) + Include (right), perfectly aligned
-            left, right = st.columns([0.62, 0.38])
-            with left:
-                st.markdown(f'<div class="attr-title">{label}</div>', unsafe_allow_html=True)
-            with right:
-                include_flags[label] = st.checkbox("Include", value=True, key=f"include_{label}")
+      # header row
+      left, right = st.columns([0.62, 0.38])
+      with left:
+        st.markdown(f'<div class="attr-title">{label}</div>', unsafe_allow_html=True)
+      with right:
+        include_flags[label] = st.checkbox("Include", value=True, key=f"include_{label}")
 
-            # Body area: dropdown when included, otherwise a spacer of same height
-            st.markdown('<div class="attr-body">', unsafe_allow_html=True)
-            if include_flags[label]:
-                values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
-                sel = st.multiselect(
-                    "",
-                    options=values,
-                    default=[],
-                    placeholder="Choose options",
-                    label_visibility="collapsed",
-                    key=f"filter_{label}"
-                )
-                if sel:
-                    selections[col] = sel
-            else:
-                # keep previous choices cleared when unchecked
-                if f"filter_{label}" in st.session_state:
-                    st.session_state[f"filter_{label}"] = []
-                # spacer keeps card height consistent
-                st.markdown("&nbsp;", unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)  # close .attr-body
+      # body
+      st.markdown('<div class="attr-body">', unsafe_allow_html=True)
+      if include_flags[label]:
+        values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
+        sel = st.multiselect(
+          "", options=values, default=[], placeholder="Choose options",
+          label_visibility="collapsed", key=f"filter_{label}"
+        )
+        if sel:
+          selections[col] = sel
+      else:
+        if f"filter_{label}" in st.session_state:
+          st.session_state[f"filter_{label}"] = []
+        st.markdown("&nbsp;", unsafe_allow_html=True)
+      st.markdown('</div>', unsafe_allow_html=True)   # .attr-body
+      st.markdown('</div>', unsafe_allow_html=True)   # .attr-card
+    idx += 1
 
-            st.markdown('</div>', unsafe_allow_html=True)  # close .attr-card
-        idx += 1
+  # Apply value filters (only if the attribute is included)
+  for label, col in seg_map.items():
+    if include_flags.get(label):
+      vals = st.session_state.get(f"filter_{label}", [])
+      if vals:
+        dff = dff[dff[col].isin(vals)]
 
-    # Apply value filters (only on attributes that are included)
-    for label, col in seg_map.items():
-        if include_flags.get(label):
-            vals = st.session_state.get(f"filter_{label}", [])
-            if vals:
-                dff = dff[dff[col].isin(vals)]
-
-
-
-# Build the list of attribute columns to group by
-#  - Start from "Include" toggles
+# attributes to group by
 group_attr_cols = [seg_map[lbl] for lbl, inc in include_flags.items() if inc]
-#  - Any attribute with a value filter becomes REQUIRED in all combos
 required_raw_cols = list(selections.keys())
 group_attr_cols = sorted(set(group_attr_cols).union(required_raw_cols))
 
 st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
 
-# Collapse NaN/empty/"None"/"U" → "Unknown" AFTER filters (so groupings are stable)
+# Normalize AFTER filters; collapse to 'Unknown' for stability; uppercase state if present
 for col in seg_cols:
-    if col in dff.columns:
-        s = dff[col].astype("string").str.strip()
-        if col == state_col:
-            s = s.str.upper()  # e.g., CA, NY
-        dff[col] = s.fillna("Unknown").replace({"": "Unknown", "None": "Unknown", "U": "Unknown", "u": "Unknown"})
+  if col in dff.columns:
+    s = dff[col].astype("string").str.strip()
+    if state_col and col == state_col:
+      s = s.str.upper()
+    dff[col] = s.fillna("Unknown").replace({"": "Unknown", "None": "Unknown", "U": "Unknown", "u": "Unknown"})
 
-# ---------- Top SKUs globally (among purchasers) ----------
+# -------------------- Top SKUs --------------------
 top_skus = []
 if msku_col and msku_col in dff.columns:
-    top_skus = (
-        dff.loc[dff["_PURCHASE"] == 1, msku_col]
-        .astype(str).str.strip()
-        .replace({"": np.nan})
-        .dropna()
-        .value_counts()
-        .head(11)
-        .index.tolist()
-    )
+  top_skus = (
+    dff.loc[dff["_PURCHASE"] == 1, msku_col]
+      .astype(str).str.strip().replace({"": np.nan}).dropna()
+      .value_counts().head(11).index.tolist()
+  )
 
-# Precompute SKU indicator columns (per-row), so groupby can sum them quickly
 sku_ind_cols = {}
 if top_skus:
-    for sku in top_skus:
-        colname = f"__SKU_{hash(sku)%10**9}"  # collision-resistant temp name
-        sku_ind_cols[sku] = colname
-        dff[colname] = ((dff[msku_col].astype(str).str.strip() == sku) & (dff["_PURCHASE"] == 1)).astype(int)
+  for sku in top_skus:
+    colname = f"__SKU_{hash(sku)%10**9}"
+    sku_ind_cols[sku] = colname
+    dff[colname] = ((dff[msku_col].astype(str).str.strip() == sku) & (dff["_PURCHASE"] == 1)).astype(int)
 
-# ---------- Build all grouping combinations (enforce required attributes) ----------
+# -------------------- Build combinations --------------------
 attrs_available = [c for c in group_attr_cols if c in dff.columns]
-req_set = set(required_raw_cols)  # raw col names with value filters
+req_set = set(required_raw_cols)
 combo_sets = []
 
 if len(attrs_available) == 0:
-    combo_sets = [()]  # grand total
+  combo_sets = [()]  # grand total
 else:
-    # Depth must be at least the number of required attrs
-    min_depth = max(1, len(req_set))
-    max_d = max(max_depth, len(req_set))
-    for d in range(min_depth, max_d + 1):
-        for s in combinations(attrs_available, d):
-            if req_set.issubset(s):
-                combo_sets.append(list(s))
-    if not combo_sets:
-        # Fallback: just require-set itself if possible
-        if req_set.issubset(set(attrs_available)):
-            combo_sets = [list(req_set)]
-        else:
-            combo_sets = [()]  # extreme fallback
+  min_depth = max(1, len(req_set))
+  max_d = max(max_depth, len(req_set))
+  for d in range(min_depth, max_d + 1):
+    for s in combinations(attrs_available, d):
+      if req_set.issubset(s):
+        combo_sets.append(list(s))
+  if not combo_sets:
+    if req_set.issubset(set(attrs_available)):
+      combo_sets = [list(req_set)]
+    else:
+      combo_sets = [()]
 
-# ---------- Aggregate for each combination ----------
+# Unknown/U/blank should not create their own groups
 def _df_for_combo(src: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
-    """Return a copy where Unknown-like values in the grouping keys are NaN,
-    so they don't create their own groups."""
-    if not keys:
-        return src
-    dst = src.copy()
-    for k in keys:
-        if k in dst.columns:
-            dst[k] = (
-                dst[k]
-                .replace({"Unknown": np.nan, "unknown": np.nan, "U": np.nan, "u": np.nan, "": np.nan})
-            )
-    return dst
+  if not keys: return src
+  dst = src.copy()
+  for k in keys:
+    if k in dst.columns:
+      dst[k] = dst[k].replace({"Unknown": np.nan, "unknown": np.nan, "U": np.nan, "u": np.nan, "": np.nan})
+  return dst
 
-def _df_for_combo(src: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
-    """Treat Unknown/U/blank as missing for the grouping keys so they don't form groups."""
-    if not keys:
-        return src
-    dst = src.copy()
-    for k in keys:
-        if k in dst.columns:
-            dst[k] = dst[k].replace({"Unknown": np.nan, "unknown": np.nan, "U": np.nan, "u": np.nan, "": np.nan})
-    return dst
-
+# -------------------- Aggregate --------------------
 rows = []
 for combo in combo_sets:
-    keys = list(combo)
+  keys = list(combo)
+  if keys:
+    dtmp = _df_for_combo(dff, keys)
 
-    if keys:
-        # Blank Unknown/U/"" only in the keys for this combo
-        dtmp = _df_for_combo(dff, keys)
-
-        # size (Visitors)
-        size_df = dtmp.groupby(keys).size().rename("Visitors").reset_index()
-
-        # numeric sums
-        agg_dict = {"_PURCHASE": "sum"}
-        if revenue_col:
-            agg_dict["_REVENUE"] = "sum"
-        for _, ind in sku_ind_cols.items():
-            agg_dict[ind] = "sum"
-
-        sums_df = dtmp.groupby(keys).agg(agg_dict).reset_index()
-        g = size_df.merge(sums_df, on=keys, how="left")
-    else:
-        # grand total
-        g = pd.DataFrame({
-            "Visitors": [int(len(dff))],
-            "_PURCHASE": [int(dff["_PURCHASE"].sum())],
-            "_REVENUE": [float(dff["_REVENUE"].sum())] if revenue_col else [0.0],
-            **{ind: [int(dff[ind].sum())] for ind in sku_ind_cols.values()}
-        })
-
-    # metrics
-    g["Purchases"] = g["_PURCHASE"].astype(int)
-    g["conv_rate"] = 100.0 * g["Purchases"] / g["Visitors"].replace(0, np.nan)
+    size_df = dtmp.groupby(keys).size().rename("Visitors").reset_index()
+    agg_dict = {"_PURCHASE": "sum"}
     if revenue_col:
-        g["rpv"] = g["_REVENUE"] / g["Visitors"].replace(0, np.nan)
-        g["revenue"] = g["_REVENUE"]
-    else:
-        g["rpv"] = 0.0
-        g["revenue"] = 0.0
-    g["Depth"] = len(keys)
+      agg_dict["_REVENUE"] = "sum"
+    for _, ind in sku_ind_cols.items():
+      agg_dict[ind] = "sum"
 
-    # keep columns in stable order: attributes → metrics → SKUs
-    cols_order = keys + ["Visitors", "Purchases", "conv_rate", "Depth", "rpv", "revenue"] + list(sku_ind_cols.values())
-    g = g[cols_order]
-    rows.append(g)
+    sums_df = dtmp.groupby(keys).agg(agg_dict).reset_index()
+    g = size_df.merge(sums_df, on=keys, how="left")
+  else:
+    g = pd.DataFrame({
+      "Visitors": [int(len(dff))],
+      "_PURCHASE": [int(dff["_PURCHASE"].sum())],
+      "_REVENUE": [float(dff["_REVENUE"].sum())] if revenue_col else [0.0],
+      **{ind: [int(dff[ind].sum())] for ind in sku_ind_cols.values()}
+    })
 
+  # metrics
+  g["Purchases"] = g["_PURCHASE"].astype(int)
+  g["conv_rate"] = 100.0 * g["Purchases"] / g["Visitors"].replace(0, np.nan)
+  if revenue_col:
+    g["rpv"] = g["_REVENUE"] / g["Visitors"].replace(0, np.nan)
+    g["revenue"] = g["_REVENUE"]
+  else:
+    g["rpv"] = 0.0
+    g["revenue"] = 0.0
+  g["Depth"] = len(keys)
 
-# Concatenate all combinations
+  cols_order = keys + ["Visitors", "Purchases", "conv_rate", "Depth", "rpv", "revenue"] + list(sku_ind_cols.values())
+  g = g[cols_order]
+  rows.append(g)
+
 res = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=["Visitors","Purchases","conv_rate","Depth"])
-
-# Apply min_rows AFTER aggregation
 res = res[res["Visitors"] >= int(min_rows)].copy()
 
 # Replace temp SKU indicator names with actual SKU names
 sku_cols = []
 if sku_ind_cols:
-    rename_map = {v: k for k, v in sku_ind_cols.items()}
-    res = res.rename(columns=rename_map)
-    sku_cols = list(rename_map.values())
+  rename_map = {v: k for k, v in sku_ind_cols.items()}
+  res = res.rename(columns=rename_map)
+  sku_cols = list(rename_map.values())
 
-# ---- Sort & limit
-sort_key_map = {
-    "Conversion %": "conv_rate",
-    "Purchases": "Purchases",
-    "Visitors": "Visitors",
-    "Revenue / Visitor": "rpv",
-}
+# -------------------- Sort & limit --------------------
+sort_key_map = {"Conversion %":"conv_rate","Purchases":"Purchases","Visitors":"Visitors","Revenue / Visitor":"rpv"}
 sort_key = sort_key_map[metric_choice]
 res = res.sort_values(sort_key, ascending=False).head(top_n).reset_index(drop=True)
 
-# Depth (display-only): count attrs that are present and not Unknown/U/blank
-attr_raw_cols_for_depth = [c for c in seg_cols if c in res.columns]
-
-def _depth_visible(row):
-    cnt = 0
-    for c in attr_raw_cols_for_depth:
-        val = row.get(c, np.nan)
-        if pd.notna(val):
-            s = str(val).strip().lower()
-            if s not in ("unknown", "u", ""):
-                cnt += 1
-    return cnt
-
-res["Depth_display"] = res.apply(_depth_visible, axis=1)
-
-
-# ---------- Prepare display
-# Friendly attribute headers -> display names (without changing internal processing)
+# -------------------- Display table --------------------
 friendly_attr = {v: k for k, v in seg_map.items()}
-
 disp = res.copy()
-# Convert counts to ints (no .0)
-for c in ["Visitors", "Purchases"]:
-    if c in disp.columns:
-        disp[c] = pd.to_numeric(disp[c], errors="coerce").fillna(0).astype(int)
 
-# Replace Depth with the display-only version
-if "Depth_display" in disp.columns:
-    disp["Depth"] = pd.to_numeric(disp["Depth_display"], errors="coerce").fillna(0).astype(int)
-
+# ints
+for c in ["Visitors","Purchases","Depth"]:
+  if c in disp.columns:
+    disp[c] = pd.to_numeric(disp[c], errors="coerce").fillna(0).astype(int)
+# SKUs: hide 0
 for c in sku_cols:
-    if c in disp.columns:
-        disp[c] = pd.to_numeric(disp[c], errors="coerce").fillna(0).astype(int)
-        disp[c] = disp[c].replace({0: ""})  # blank out 0s for SKUs
+  if c in disp.columns:
+    disp[c] = pd.to_numeric(disp[c], errors="coerce").fillna(0).astype(int).replace({0:""})
 
-# Pretty formats
+# pretty formats
 disp["Conversion %"] = disp["conv_rate"].map(lambda x: f"{x:.2f}%" if pd.notnull(x) else "")
 if "rpv" in disp.columns:
-    disp["Revenue / Visitor"] = disp["rpv"].map(lambda x: f"${x:,.2f}" if pd.notnull(x) else "")
+  disp["Revenue / Visitor"] = disp["rpv"].map(lambda x: f"${x:,.2f}" if pd.notnull(x) else "")
 
-# Rename attribute columns to friendly labels for display
+# attribute headers → friendly labels
 disp = disp.rename(columns=friendly_attr)
 
-
-# DISPLAY-ONLY: blank None/NaN and the strings "None" / "Unknown" / "U"
-attr_display_cols = [
-    lbl for lbl in
-    ["Gender", "Age Range", "Homeowner", "Married", "Children", "Income Range", "Net Worth", "Credit Rating", "State"]
-    if lbl in disp.columns
-]
+# display-only: blank None/"Unknown"/"U"
+attr_display_cols = [lbl for lbl in ["Gender","Age Range","Homeowner","Married","Children","Income Range","Net Worth","Credit Rating"] if lbl in disp.columns]
 for c in attr_display_cols:
-    s = disp[c].astype("string")
-    mask = s.isna() | s.str.strip().str.lower().isin(["none", "unknown", "u"])
-    disp[c] = s.mask(mask, "")
+  s = disp[c].astype("string")
+  mask = s.isna() | s.str.strip().str.lower().isin(["none","unknown","u"])
+  disp[c] = s.mask(mask, "")
 
+# rank
+disp.insert(0, "Rank", np.arange(1, len(disp)+1))
 
-# Insert Rank
-disp.insert(0, "Rank", np.arange(1, len(disp) + 1))
-
-# ---- Column order (Purchasers + RPV in the table; SKUs on the right)
-desired_attr_labels = [
-    "Gender", "Age Range", "Homeowner", "Married", "Children",
-    "Income Range", "Net Worth", "Credit Rating"
-]
+desired_attr_labels = ["Gender","Age Range","Homeowner","Married","Children","Income Range","Net Worth","Credit Rating"]  # (no State)
 middle_cols = [lbl for lbl in desired_attr_labels if lbl in disp.columns]
-right_cols = [c for c in sku_cols if c in disp.columns]  # SKUs to the right
-
-# Add Purchasers (display alias)
+right_cols = [c for c in sku_cols if c in disp.columns]
 disp["Purchasers"] = disp["Purchases"]
-left_cols = ["Rank", "Visitors", "Purchasers", "Conversion %", "Revenue / Visitor", "Depth"]
-
-# Some groups may lack attributes; keep any extra attribute cols at the end of middle section
+left_cols = ["Rank","Visitors","Purchasers","Conversion %","Revenue / Visitor","Depth"]
 extra_attrs = [c for c in friendly_attr.values() if c in disp.columns and c not in middle_cols]
-
 table_cols = [c for c in left_cols + middle_cols + extra_attrs + right_cols if c in disp.columns]
 
-# Bold the column that matches the selected sort metric
-display_metric_map = {
-    "Conversion %": "Conversion %",
-    "Purchases": "Purchasers",
-    "Visitors": "Visitors",
-    "Revenue / Visitor": "Revenue / Visitor",
-}
-selected_display_metric = display_metric_map.get(metric_choice, "Conversion %")
+# dynamic bolding
+display_metric_map = {"Conversion %":"Conversion %","Purchases":"Purchasers","Visitors":"Visitors","Revenue / Visitor":"Revenue / Visitor"}
+selected_display_metric = display_metric_map.get(metric_choice,"Conversion %")
 
 def highlight_selected_metric(s):
-    return ["font-weight: bold" if s.name == selected_display_metric else "" for _ in s]
+  return ["font-weight: bold" if s.name == selected_display_metric else "" for _ in s]
 
-styled = (
-    disp[table_cols]
-    .style
-    .apply(highlight_selected_metric, axis=0)         # keep dynamic bolding
-    .set_properties(**{"text-align": "center"})       # center all body cells
-    .set_table_styles([                               
-        {"selector": "th",               "props": [("text-align", "center")]},
-        {"selector": "th.col_heading",   "props": [("text-align", "center")]},
-        {"selector": "th.row_heading",   "props": [("text-align", "center")]},
-        {"selector": "td",               "props": [("text-align", "center")]},
-    ])
-)
-
+styled = disp[table_cols].style.apply(highlight_selected_metric, axis=0)
 st.dataframe(styled, use_container_width=True, hide_index=True)
 
-
-# ---------- Download CSV ----------
+# -------------------- Download CSV --------------------
 csv_out = res.copy()
-csv_out.insert(0, "Rank", np.arange(1, len(csv_out) + 1))
-
-# Order CSV: include Purchases and numeric metrics; use friendly names for attributes
+csv_out.insert(0, "Rank", np.arange(1, len(csv_out)+1))
 csv_out = csv_out.rename(columns=friendly_attr)
 
 csv_attr_cols = [lbl for lbl in desired_attr_labels if lbl in csv_out.columns]
 extra_csv_attrs = [c for c in friendly_attr.values() if c in csv_out.columns and c not in csv_attr_cols]
 csv_sku_cols = [c for c in sku_cols if c in csv_out.columns]
 
-csv_cols = ["Rank", "Visitors", "Purchases", "conv_rate", "Depth", "rpv", "revenue"] + csv_attr_cols + extra_csv_attrs + csv_sku_cols
+csv_cols = ["Rank","Visitors","Purchases","conv_rate","Depth","rpv","revenue"] + csv_attr_cols + extra_csv_attrs + csv_sku_cols
 csv_cols = [c for c in csv_cols if c in csv_out.columns]
-csv_out = csv_out[csv_cols].rename(columns={
-    "conv_rate": "Conversion % (0-100)",
-    "rpv": "Revenue / Visitor",
-    "revenue": "Revenue",
-})
+csv_out = csv_out[csv_cols].rename(columns={"conv_rate":"Conversion % (0-100)","rpv":"Revenue / Visitor","revenue":"Revenue"})
 
-# Cast integer-like columns to Int64 to avoid .0 in CSV
-int_like = ["Rank", "Visitors", "Purchases", "Depth"] + csv_sku_cols
+int_like = ["Rank","Visitors","Purchases","Depth"] + csv_sku_cols
 for c in int_like:
-    if c in csv_out.columns:
-        csv_out[c] = pd.to_numeric(csv_out[c], errors="coerce").fillna(0).astype("Int64")
+  if c in csv_out.columns:
+    csv_out[c] = pd.to_numeric(csv_out[c], errors="coerce").fillna(0).astype("Int64")
 
 st.download_button(
-    "Download ranked combinations (CSV)",
-    data=csv_out.to_csv(index=False).encode("utf-8"),
-    file_name="ranked_combinations.csv",
-    mime="text/csv"
+  "Download ranked combinations (CSV)",
+  data=csv_out.to_csv(index=False).encode("utf-8"),
+  file_name="ranked_combinations.csv",
+  mime="text/csv"
 )
