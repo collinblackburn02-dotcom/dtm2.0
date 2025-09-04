@@ -71,6 +71,7 @@ with st.sidebar:
   metric_choice = st.radio(
       "Sort metric", ["Conversion %", "Purchases", "Visitors", "Revenue / Visitor"], index=0
   )
+  sort_high_to_low = st.toggle("High → Low", value=True, help="Turn off to sort Low → High")
   max_depth = st.slider("Max combo depth", 1, 4, 4, 1)
   top_n = st.slider("Top N", 10, 1000, 50, 10)
   min_rows = st.number_input("Minimum Visitors per group", min_value=50, value=1000, step=50)
@@ -305,7 +306,7 @@ if sku_ind_cols:
 # -------------------- Sort & limit --------------------
 sort_key_map = {"Conversion %":"conv_rate","Purchases":"Purchases","Visitors":"Visitors","Revenue / Visitor":"rpv"}
 sort_key = sort_key_map[metric_choice]
-res = res.sort_values(sort_key, ascending=False).head(top_n).reset_index(drop=True)
+res = res.sort_values(sort_key, ascending=not sort_high_to_low).head(top_n).reset_index(drop=True)
 
 # -------------------- Display table --------------------
 friendly_attr = {v: k for k, v in seg_map.items()}
