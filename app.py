@@ -105,24 +105,24 @@ if SHOW_GLOBAL_FILTERS:
             dff.loc[mask_u, col] = pd.NA
 
     # Date filter (only if DATE exists)
-    if not pd.isna(dff["_DATE"]).all():
+  if not pd.isna(dff["_DATE"]).all():
         mind, maxd = pd.to_datetime(dff["_DATE"].dropna().min()), pd.to_datetime(dff["_DATE"].dropna().max())
         c1, c2 = st.columns(2)
-        with c1:
+      with c1:
             start_end = st.date_input("Date range", (mind.date(), maxd.date()))
-        with c2:
+      with c2:
             include_undated = st.checkbox("Include no-date rows", value=True)
-        if isinstance(start_end, (list, tuple)) and len(start_end) == 2:
+      if isinstance(start_end, (list, tuple)) and len(start_end) == 2:
             start, end = start_end
             mask = dff["_DATE"].between(pd.to_datetime(start), pd.to_datetime(end))
-            if include_undated:
+          if include_undated:
                 mask = mask | dff["_DATE"].isna()
             dff = dff[mask]
 
     # SKU contains filter
-    sku_search = st.text_input("Most Recent SKU contains (optional)")
-    if msku_col and sku_search:
-        dff = dff[dff[msku_col].astype(str).str.contains(sku_search, case=False, na=False)]
+  sku_search = st.text_input("Most Recent SKU contains (optional)")
+  if msku_col and sku_search:
+      dff = dff[dff[msku_col].astype(str).str.contains(sku_search, case=False, na=False)]
 
 # Attribute value filters + Include checkboxes (all included by default)
 selections = {}
