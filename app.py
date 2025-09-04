@@ -304,11 +304,12 @@ def hide_none_style(v):
 st.dataframe(
     disp[table_cols]
     .style
-    .apply(highlight_selected_metric, axis=0)   # dynamic bolding
-    .applymap(lambda v: "color: white" if isinstance(v, str) and v.strip().lower() == "none" else ""),  # hide 'none'
+    .apply(highlight_selected_metric, axis=0)  # dynamic bolding
+    .applymap(hide_none_style),                # hides None/NaN/"None"
     use_container_width=True,
     hide_index=True
 )
+
 
 # ---------- Download CSV ----------
 csv_out = res.copy()
