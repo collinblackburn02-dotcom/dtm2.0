@@ -8,6 +8,16 @@ st.set_page_config(page_title="Heavenly Health — Customer Insights", layout="w
 st.title("✨ Heavenly Health — Customer Insights")
 st.caption("Fast, ranked customer segments (Pandas-only, robust and simple).")
 
+# --- Compact UI tweaks for the Attributes grid ---
+st.markdown("""
+<style>
+  .attr-title { font-weight: 700; font-size: 1.15rem; margin: 0 0 4px 0; }
+  .attr-spacer-tight { height: 4px; }
+  .attr-group { margin-bottom: 26px; }  /* space between different attributes */
+</style>
+""", unsafe_allow_html=True)
+
+
 # ---------- Sidebar ----------
 with st.sidebar:
     uploaded = st.file_uploader("Upload merged CSV", type=["csv"])
@@ -102,7 +112,7 @@ with st.expander("🔎 Filters", expanded=True):
     if msku_col and sku_search:
         dff = dff[dff[msku_col].astype(str).str.contains(sku_search, case=False, na=False)]
 
-   # Attribute value filters + Include checkboxes (all included by default)
+# Attribute value filters + Include checkboxes (all included by default)
 selections = {}
 include_flags = {}  # label -> bool
 if seg_cols:
@@ -111,29 +121,45 @@ if seg_cols:
     idx = 0
     for label, col in seg_map.items():
         with cols[idx % 3]:
-            # Bold attribute name (single place the attribute appears)
-            st.markdown(f"**{label}**")
-            # Checkbox label is just "Include" so the box is before the word Include
+            st.markdown('<div class="attr-group">', unsafe_allow_html=True)
+
+            # Title (bigger + bold, no duplicate label)
+            st.markdown(f'<div class="attr-title">{label}</div>', unsafe_allow_html=True)
+
+            # Checkbox with the label "Include" (box appears before the word)
             include_flags[label] = st.checkbox("Include", value=True, key=f"include_{label}")
 
-            # Multiselect with no visible label (cleaner UI)
-            values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
-            sel = st.multiselect(
-                "",  # no label text
-                options=values,
-                default=[],
-                help="Empty = All",
-                placeholder="Choose options",
-                label_visibility="collapsed",  # hides the label area entirely
-                key=f"filter_{label}"
-            )
-            if sel:
-                selections[col] = sel
+            # Small spacer to tighten the block visually
+            st.markdown('<div class="attr-spacer-tight"></div>', unsafe_allow_html=True)
+
+            # Only show the dropdown if Include is checked
+            if include_flags[label]:
+                values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
+                sel = st.multiselect(
+                    "",
+                    options=values,
+                    default=[],
+                    placeholder="Choose options",
+                    label_visibility="collapsed",
+                    key=f"filter_{label}"
+                )
+                if sel:
+                    selections[col] = sel
+            else:
+                # If user previously chose values then unchecked Include, ignore them
+                if f"filter_{label}" in st.session_state:
+                    st.session_state[f"filter_{label}"] = []
+
+            st.markdown('</div>', unsafe_allow_html=True)
         idx += 1
 
-    # Apply value filters
-    for col, vals in selections.items():
-        dff = dff[dff[col].isin(vals)]
+    # Apply value filters (only on attributes that are included)
+    for label, col in seg_map.items():
+        if include_flags.get(label):
+            vals = st.session_state.get(f"filter_{label}", [])
+            if vals:
+                dff = dff[dff[col].isin(vals)]
+
 
 
 # Build the list of attribute columns to group by
