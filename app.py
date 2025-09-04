@@ -289,6 +289,17 @@ selected_display_metric = display_metric_map.get(metric_choice, "Conversion %")
 def highlight_selected_metric(s):
     return ["font-weight: bold" if s.name == selected_display_metric else "" for _ in s]
 
+import math
+def hide_none_style(v):
+    # Hide Python None, NaN, or the string "None" (case-insensitive)
+    if v is None:
+        return "color: transparent"
+    if isinstance(v, float) and math.isnan(v):
+        return "color: transparent"
+    if isinstance(v, str) and v.strip().lower() == "none":
+        return "color: transparent"
+    return ""
+
 
 st.dataframe(
     disp[table_cols]
