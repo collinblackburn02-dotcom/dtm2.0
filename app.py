@@ -108,6 +108,8 @@ seg_map = {
     "Homeowner":     resolve_col(df, "Home_Owner"),
     "Married":       resolve_col(df, "Married"),
     "Children":      resolve_col(df, "Children"),
+    "State":         resolve_col(df, "State"),
+
 }
 # keep only found columns
 seg_map = {label: col for label, col in seg_map.items() if col is not None}
@@ -215,13 +217,10 @@ st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
 # Collapse NaN/empty/"None"/"U" → "Unknown" AFTER filters (so groupings are stable)
 for col in seg_cols:
     if col in dff.columns:
-        dff[col] = (
-            dff[col]
-            .astype("string")
-            .fillna("Unknown")
-            .replace({"": "Unknown", "None": "Unknown", "U": "Unknown", "u": "Unknown"})
-            .str.strip()
-        )
+        s = dff[col].astype("string").str.strip()
+        if col == state_col:
+            s = s.str.upper()  # e.g., CA, NY
+        dff[col] = s.fillna("Unknown").replace({"": "Unknown", "None": "Unknown", "U": "Unknown", "u": "Unknown"})
 
 # ---------- Top SKUs globally (among purchasers) ----------
 top_skus = []
