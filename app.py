@@ -11,11 +11,12 @@ st.caption("Fast, ranked customer segments (Pandas-only, robust and simple).")
 # --- Compact UI tweaks for the Attributes grid ---
 st.markdown("""
 <style>
-  .attr-title { font-weight: 700; font-size: 1.15rem; margin: 0 0 4px 0; }
-  .attr-spacer-tight { height: 4px; }
-  .attr-group { margin-bottom: 26px; }  /* space between different attributes */
+  .attr-title { font-weight: 700; font-size: 1.15rem; margin: 0; }
+  .attr-row   { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .attr-group { margin-bottom: 28px; }  /* space between different attributes */
 </style>
 """, unsafe_allow_html=True)
+
 
 
 # ---------- Sidebar ----------
@@ -123,16 +124,14 @@ if seg_cols:
         with cols[idx % 3]:
             st.markdown('<div class="attr-group">', unsafe_allow_html=True)
 
-            # Title (bigger + bold, no duplicate label)
-            st.markdown(f'<div class="attr-title">{label}</div>', unsafe_allow_html=True)
+            # Header row: Title (left) + Include checkbox (right)
+            left, right = st.columns([0.62, 0.38])
+            with left:
+                st.markdown(f'<div class="attr-title">{label}</div>', unsafe_allow_html=True)
+            with right:
+                include_flags[label] = st.checkbox("Include", value=True, key=f"include_{label}")
 
-            # Checkbox with the label "Include" (box appears before the word)
-            include_flags[label] = st.checkbox("Include", value=True, key=f"include_{label}")
-
-            # Small spacer to tighten the block visually
-            st.markdown('<div class="attr-spacer-tight"></div>', unsafe_allow_html=True)
-
-            # Only show the dropdown if Include is checked
+            # Dropdown appears in the main column area, only if Include is checked
             if include_flags[label]:
                 values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
                 sel = st.multiselect(
