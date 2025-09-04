@@ -48,11 +48,11 @@ st.markdown("""
   .stMultiSelect [data-baseweb="select"] > div { border-color: #e8ddd3 !important; }
 
   /* Attribute cards */
-  .attr-card   { display:flex; flex-direction:column; gap:4px; min-height:110px; margin-bottom:12px; }
+  .attr-card   { display:flex; flex-direction:column; gap:4px; min-height:10px; margin-bottom:0px; }
   .attr-header { display:flex; align-items:center; justify-content:space-between; }
   .attr-title  { font-weight:700; font-size:1.08rem; margin:0; }
   div[data-testid="stCheckbox"] { margin:0; display:flex; align-items:center; justify-content:flex-end; }
-  .attr-body   { min-height:44px; display:flex; align-items:center; }
+  .attr-body   { min-height:4px; display:flex; align-items:center; }
 
   /* Center st.dataframe headers + cells */
   [data-testid="stDataFrame"] th, [data-testid="stDataFrame"] td {
