@@ -16,8 +16,8 @@ SHOW_GLOBAL_FILTERS = False     # hidden for now
 EXCLUDE_STATE = True            # hide/ignore State everywhere
 
 # Header
-st.title("✨ Heavenly Health — Customer Insights")
-st.caption("Fast, ranked customer segments (Pandas-only, robust and simple).")
+st.title("Heavenly Health — Customer Insights")
+st.caption("Fast, ranked customer segments.")
 
 # --- Brand CSS ---
 st.markdown("""
