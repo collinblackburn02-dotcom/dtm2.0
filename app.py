@@ -95,8 +95,8 @@ seg_cols = list(seg_map.values())
 
 # ---------- Filters + Include toggles ----------
 if SHOW_GLOBAL_FILTERS:
-    with st.expander("🔎 Filters", expanded=False):
-    dff = df.copy()
+  with st.expander("🔎 Filters", expanded=False):
+      dff = df.copy()
 
     # Treat 'U' as missing for Gender and Credit before collapsing
     for label, col in seg_map.items():
