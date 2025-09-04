@@ -266,20 +266,50 @@ else:
             combo_sets = [()]  # extreme fallback
 
 # ---------- Aggregate for each combination ----------
+def _df_for_combo(src: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
+    """Return a copy where Unknown-like values in the grouping keys are NaN,
+    so they don't create their own groups."""
+    if not keys:
+        return src
+    dst = src.copy()
+    for k in keys:
+        if k in dst.columns:
+            dst[k] = (
+                dst[k]
+                .replace({"Unknown": np.nan, "unknown": np.nan, "U": np.nan, "u": np.nan, "": np.nan})
+            )
+    return dst
+
+def _df_for_combo(src: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
+    """Treat Unknown/U/blank as missing for the grouping keys so they don't form groups."""
+    if not keys:
+        return src
+    dst = src.copy()
+    for k in keys:
+        if k in dst.columns:
+            dst[k] = dst[k].replace({"Unknown": np.nan, "unknown": np.nan, "U": np.nan, "u": np.nan, "": np.nan})
+    return dst
+
 rows = []
 for combo in combo_sets:
-    combo = list(combo)
-    if combo:
+    keys = list(combo)
+
+    if keys:
+        # Blank Unknown/U/"" only in the keys for this combo
+        dtmp = _df_for_combo(dff, keys)
+
         # size (Visitors)
-        size_df = dff.groupby(combo, dropna=False).size().rename("Visitors").reset_index()
+        size_df = dtmp.groupby(keys).size().rename("Visitors").reset_index()
+
         # numeric sums
         agg_dict = {"_PURCHASE": "sum"}
         if revenue_col:
             agg_dict["_REVENUE"] = "sum"
-        for sku, ind in sku_ind_cols.items():
+        for _, ind in sku_ind_cols.items():
             agg_dict[ind] = "sum"
-        sums_df = dff.groupby(combo, dropna=False).agg(agg_dict).reset_index()
-        g = size_df.merge(sums_df, on=combo, how="left")
+
+        sums_df = dtmp.groupby(keys).agg(agg_dict).reset_index()
+        g = size_df.merge(sums_df, on=keys, how="left")
     else:
         # grand total
         g = pd.DataFrame({
@@ -298,12 +328,13 @@ for combo in combo_sets:
     else:
         g["rpv"] = 0.0
         g["revenue"] = 0.0
-    g["Depth"] = len(combo)
+    g["Depth"] = len(keys)
 
     # keep columns in stable order: attributes → metrics → SKUs
-    cols_order = combo + ["Visitors", "Purchases", "conv_rate", "Depth", "rpv", "revenue"] + list(sku_ind_cols.values())
+    cols_order = keys + ["Visitors", "Purchases", "conv_rate", "Depth", "rpv", "revenue"] + list(sku_ind_cols.values())
     g = g[cols_order]
     rows.append(g)
+
 
 # Concatenate all combinations
 res = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=["Visitors","Purchases","conv_rate","Depth"])
