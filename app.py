@@ -88,6 +88,8 @@ state_col = (
     or resolve_col(df, "Personal_State")
 )
 
+EXCLUDE_STATE = True
+
 
 if purchase_col is None:
     st.error("Missing Purchase column.")
@@ -108,12 +110,18 @@ seg_map = {
     "Homeowner":     resolve_col(df, "Home_Owner"),
     "Married":       resolve_col(df, "Married"),
     "Children":      resolve_col(df, "Children"),
-    "State":         resolve_col(df, "State"),
-
+    "State":         state_col,   # <-- keep this line
 }
 # keep only found columns
 seg_map = {label: col for label, col in seg_map.items() if col is not None}
 seg_cols = list(seg_map.values())
+
+# 🚫 Drop State everywhere when flag is on
+if EXCLUDE_STATE and "State" in seg_map:
+    del seg_map["State"]
+    state_col = None
+  
+
 
 # ---------- Filters + Include toggles ----------
 # Always start from a working copy
