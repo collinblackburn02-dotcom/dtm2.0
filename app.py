@@ -125,7 +125,7 @@ if seg_cols:
 group_attr_cols = [seg_map[lbl] for lbl, inc in include_flags.items() if inc]
 
 
-    st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
+st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
 
 # Collapse NaN/empty/"None"/"U" → "Unknown" AFTER filters (so groupings are stable)
 for col in seg_cols:
