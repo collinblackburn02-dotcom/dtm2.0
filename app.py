@@ -80,6 +80,14 @@ purchase_col = resolve_col(df, "Purchase")
 date_col     = resolve_col(df, "DATE")        # optional
 msku_col     = resolve_col(df, "SKU")
 revenue_col  = resolve_col(df, "Revenue")
+state_col = (
+    resolve_col(df, "State")
+    or resolve_col(df, "US_STATE")
+    or resolve_col(df, "STATE_CODE")
+    or resolve_col(df, "STATE_ABBR")
+    or resolve_col(df, "Personal_State")
+)
+
 
 if purchase_col is None:
     st.error("Missing Purchase column.")
