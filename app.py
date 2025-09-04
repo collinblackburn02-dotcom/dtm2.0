@@ -8,18 +8,19 @@ st.set_page_config(page_title="Heavenly Health — Customer Insights", layout="w
 st.title("✨ Heavenly Health — Customer Insights")
 st.caption("Fast, ranked customer segments (Pandas-only, robust and simple).")
 
-# --- Attribute cards: alignment + fixed heights ---
+# --- Attribute cards: alignment + compact fixed heights ---
 st.markdown("""
 <style>
-  .attr-card   { display:flex; flex-direction:column; gap:6px; min-height:170px; margin-bottom:30px; }
+  .attr-card   { display:flex; flex-direction:column; gap:4px; min-height:110px; margin-bottom:12px; }
   .attr-header { display:flex; align-items:center; justify-content:space-between; }
-  .attr-title  { font-weight:700; font-size:1.15rem; margin:0; }
+  .attr-title  { font-weight:700; font-size:1.08rem; margin:0; }
   /* Align Streamlit checkbox inline with the title */
   div[data-testid="stCheckbox"] { margin:0; display:flex; align-items:center; justify-content:flex-end; }
-  /* Reserve space for the dropdown so cards stay same height even when unchecked */
-  .attr-body   { min-height:56px; display:flex; align-items:center; }
+  /* Reserve just enough space for one multiselect row so all cards line up */
+  .attr-body   { min-height:44px; display:flex; align-items:center; }
 </style>
 """, unsafe_allow_html=True)
+
 
 
 
@@ -123,7 +124,7 @@ selections = {}
 include_flags = {}  # label -> bool
 if seg_cols:
     st.markdown("**Attributes**")
-    cols = st.columns(3, gap="large")
+    cols = st.columns(3, gap="small")
     idx = 0
     for label, col in seg_map.items():
         with cols[idx % 3]:
