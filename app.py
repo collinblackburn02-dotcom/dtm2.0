@@ -20,7 +20,7 @@ st.markdown("""
   .attr-title  { font-weight:700; font-size:1.08rem; margin:0; }
   /* Align Streamlit checkbox inline with the title */
   div[data-testid="stCheckbox"] { margin:0; display:flex; align-items:center; justify-content:flex-end; }
-  /* Reserve just enough space for one multiselect row so all cards line up */
+  /* erve just enough space for one multiselect row so all cards line up */
   .attr-body   { min-height:2px; display:flex; align-items:center; }
 </style>
 """, unsafe_allow_html=True)
@@ -328,15 +328,36 @@ sort_key_map = {
 sort_key = sort_key_map[metric_choice]
 res = res.sort_values(sort_key, ascending=False).head(top_n).reset_index(drop=True)
 
+# Depth (display-only): count attrs that are present and not Unknown/U/blank
+attr_raw_cols_for_depth = [c for c in seg_cols if c in res.columns]
+
+def _depth_visible(row):
+    cnt = 0
+    for c in attr_raw_cols_for_depth:
+        val = row.get(c, np.nan)
+        if pd.notna(val):
+            s = str(val).strip().lower()
+            if s not in ("unknown", "u", ""):
+                cnt += 1
+    return cnt
+
+res["Depth_display"] = res.apply(_depth_visible, axis=1)
+
+
 # ---------- Prepare display
 # Friendly attribute headers -> display names (without changing internal processing)
 friendly_attr = {v: k for k, v in seg_map.items()}
 
 disp = res.copy()
 # Convert counts to ints (no .0)
-for c in ["Visitors", "Purchases", "Depth"]:
+for c in ["Visitors", "Purchases"]:
     if c in disp.columns:
         disp[c] = pd.to_numeric(disp[c], errors="coerce").fillna(0).astype(int)
+
+# Replace Depth with the display-only version
+if "Depth_display" in disp.columns:
+    disp["Depth"] = pd.to_numeric(disp["Depth_display"], errors="coerce").fillna(0).astype(int)
+
 for c in sku_cols:
     if c in disp.columns:
         disp[c] = pd.to_numeric(disp[c], errors="coerce").fillna(0).astype(int)
