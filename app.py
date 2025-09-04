@@ -6,7 +6,46 @@ from utils import resolve_col
 
 st.set_page_config(page_title="Heavenly Health — Customer Insights", layout="wide")
 st.title("✨ Heavenly Health — Customer Insights")
-st.caption("Fast, ranked customer segments (Pandas-only, robust and simple).")
+st.caption("")
+
+# --- Heavenly Heat look & feel ---
+st.markdown("""
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Playfair+Display:wght@700&display=swap');
+
+  :root{
+    --ink:#2A2A2A;
+    --bg:#F7F3EE;           /* warm cream */
+    --panel:#FFFFFF;
+    --accent:#6A3E2E;       /* cocoa */
+    --accent2:#C67A57;      /* copper */
+    --muted:#8D8379;
+  }
+
+  html, body, [data-testid="stAppViewContainer"]{
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  h1, h2, h3 { font-family: 'Playfair Display', serif; color: var(--accent); letter-spacing: .2px; }
+  [data-testid="stSidebar"] { background: var(--panel); border-right: 1px solid #ece3da; }
+
+  /* Buttons/radios/sliders tint */
+  .stButton > button { background: var(--accent); color: #fff; border: 0; }
+  .stButton > button:hover { background: #5a3326; }
+
+  /* Multi-select pills + focus */
+  .stMultiSelect [data-baseweb="tag"] { background: #f2e7df; }
+  .stMultiSelect [data-baseweb="select"] > div { border-color: #e8ddd3; }
+  .stRadio [role="radio"][aria-checked="true"] { color: var(--accent); }
+</style>
+""", unsafe_allow_html=True)
+
+
+# Assets (RAW GitHub URLs)
+DATA_URL = "https://raw.githubusercontent.com/collinblackburn02-dotcom/dtm2.0/main/Copy%20of%20DAN_HHS%20-%20Copy%20of%20MergedForDashboard.csv"
+LOGO_URL = "https://raw.githubusercontent.com/collinblackburn02-dotcom/dtm2.0/main/Heavenly%20Health%20Logo.jpg"
 
 # Toggle to show/hide the top (global) filters UI
 SHOW_GLOBAL_FILTERS = False   # set to True later if you want to expose them again
@@ -43,7 +82,7 @@ st.markdown("""
 
 # ---------- Sidebar ----------
 with st.sidebar:
-    uploaded = st.file_uploader("Upload merged CSV", type=["csv"])
+    st.image(LOGO_URL, use_column_width=True)
     st.markdown("---")
     metric_choice = st.radio(
         "Sort metric",
@@ -68,12 +107,8 @@ def to_datetime_series(s: pd.Series) -> pd.Series:
     except Exception:
         return pd.to_datetime(pd.Series([None]*len(s)))
 
-if not uploaded:
-    st.info("Upload the merged CSV to begin.")
-    st.stop()
-
 # ---------- Load Data ----------
-df = load_df(uploaded)
+df = load_df(DATA_URL)
 
 # Resolve key columns (case-insensitive)
 purchase_col = resolve_col(df, "Purchase")
