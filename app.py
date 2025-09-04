@@ -8,14 +8,19 @@ st.set_page_config(page_title="Heavenly Health — Customer Insights", layout="w
 st.title("✨ Heavenly Health — Customer Insights")
 st.caption("Fast, ranked customer segments (Pandas-only, robust and simple).")
 
-# --- Compact UI tweaks for the Attributes grid ---
+# --- Attribute cards: alignment + fixed heights ---
 st.markdown("""
 <style>
-  .attr-title { font-weight: 700; font-size: 1.15rem; margin: 0; }
-  .attr-row   { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-  .attr-group { margin-bottom: 28px; }  /* space between different attributes */
+  .attr-card   { display:flex; flex-direction:column; gap:6px; min-height:170px; margin-bottom:30px; }
+  .attr-header { display:flex; align-items:center; justify-content:space-between; }
+  .attr-title  { font-weight:700; font-size:1.15rem; margin:0; }
+  /* Align Streamlit checkbox inline with the title */
+  div[data-testid="stCheckbox"] { margin:0; display:flex; align-items:center; justify-content:flex-end; }
+  /* Reserve space for the dropdown so cards stay same height even when unchecked */
+  .attr-body   { min-height:56px; display:flex; align-items:center; }
 </style>
 """, unsafe_allow_html=True)
+
 
 
 
@@ -122,16 +127,18 @@ if seg_cols:
     idx = 0
     for label, col in seg_map.items():
         with cols[idx % 3]:
-            st.markdown('<div class="attr-group">', unsafe_allow_html=True)
+            # Card wrapper (fixed height)
+            st.markdown('<div class="attr-card">', unsafe_allow_html=True)
 
-            # Header row: Title (left) + Include checkbox (right)
+            # Header row: title (left) + Include (right), perfectly aligned
             left, right = st.columns([0.62, 0.38])
             with left:
                 st.markdown(f'<div class="attr-title">{label}</div>', unsafe_allow_html=True)
             with right:
                 include_flags[label] = st.checkbox("Include", value=True, key=f"include_{label}")
 
-            # Dropdown appears in the main column area, only if Include is checked
+            # Body area: dropdown when included, otherwise a spacer of same height
+            st.markdown('<div class="attr-body">', unsafe_allow_html=True)
             if include_flags[label]:
                 values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
                 sel = st.multiselect(
@@ -145,11 +152,14 @@ if seg_cols:
                 if sel:
                     selections[col] = sel
             else:
-                # If user previously chose values then unchecked Include, ignore them
+                # keep previous choices cleared when unchecked
                 if f"filter_{label}" in st.session_state:
                     st.session_state[f"filter_{label}"] = []
+                # spacer keeps card height consistent
+                st.markdown("&nbsp;", unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)  # close .attr-body
 
-            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)  # close .attr-card
         idx += 1
 
     # Apply value filters (only on attributes that are included)
