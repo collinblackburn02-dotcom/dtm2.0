@@ -197,7 +197,7 @@ revenue_sql = (
 
 sql = f"""
 SELECT
-  {(", ".join([f'"{c}"' for c in attrs]) + "," if attrs else "" }
+  {(", ".join([f'"{c}"' for c in attrs]) + "," if attrs else "" )}
   COUNT(*) AS Visitors,
   SUM(_PURCHASE) AS Purchases,
   100.0 * SUM(_PURCHASE) / NULLIF(COUNT(*),0) AS conv_rate,
