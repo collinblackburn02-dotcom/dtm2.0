@@ -17,9 +17,11 @@ with st.sidebar:
         ["Conversion %", "Purchases", "Visitors", "Revenue / Visitor"],
         index=0
     )
-    max_depth = st.slider("Max combo depth", 1, 4, 2, 1)
+    # Max combo depth: now up to 5, default 5
+    max_depth = st.slider("Max combo depth", 1, 5, 5, 1)
     top_n = st.slider("Top N", 10, 1000, 50, 10)
-    min_rows = st.number_input("Minimum Visitors per group", min_value=1, value=30, step=1)
+    # Min visitors: default 500, min allowed 50
+    min_rows = st.number_input("Minimum Visitors per group", min_value=50, value=500, step=50)
 
 @st.cache_data(show_spinner=False)
 def load_df(file):
@@ -253,7 +255,7 @@ disp = disp.rename(columns=friendly_attr)
 # Insert Rank
 disp.insert(0, "Rank", np.arange(1, len(disp) + 1))
 
-# Column order (Purchases intentionally hidden from table per your spec)
+# ---- Column order (now includes Purchasers + RPV in the table)
 desired_attr_labels = [
     "Gender", "Age Range", "Homeowner", "Married", "Children",
     "Income Range", "Net Worth", "Credit Rating"
@@ -262,7 +264,9 @@ desired_attr_labels = [
 middle_cols = [lbl for lbl in desired_attr_labels if lbl in disp.columns]
 right_cols = [c for c in sku_cols if c in disp.columns]  # SKUs to the right
 
-left_cols = ["Rank", "Visitors", "Conversion %", "Depth"]  # Purchases hidden in table
+# Add Purchasers (display name) and Revenue / Visitor to the table
+disp["Purchasers"] = disp["Purchases"]  # display alias
+left_cols = ["Rank", "Visitors", "Purchasers", "Conversion %", "Revenue / Visitor", "Depth"]
 
 # Some groups may lack attributes; keep any extra attribute cols at the end of middle section
 extra_attrs = [c for c in friendly_attr.values() if c in disp.columns and c not in middle_cols]
@@ -306,8 +310,3 @@ st.download_button(
     file_name="ranked_combinations.csv",
     mime="text/csv"
 )
-
-data=csv_out.to_csv(index=False).encode("utf-8"),
-file_name="ranked_combinations_duckdb.csv",
-mime="text/csv"
-
