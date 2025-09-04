@@ -424,6 +424,6 @@ cols = st.columns(2, gap="small")
 for i, label in enumerate(_attr_order):
     colname = seg_map[label]
     tbl = compute_attr_table(df, colname)  # uses full df (static)
-    with cols[i % 3]:
+    with cols[i % 2]:
         st.markdown(f"**{label}**")
         st.dataframe(_style_attr(tbl), use_container_width=True, hide_index=True)
