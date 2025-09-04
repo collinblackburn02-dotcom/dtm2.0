@@ -132,6 +132,11 @@ with st.expander("🔎 Filters", expanded=True):
 
     st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
 
+# Collapse NaN/empty into "Unknown"
+for col in seg_cols:
+    if col in dff.columns:
+        dff[col] = dff[col].fillna("Unknown").replace("", "Unknown").replace("None", "Unknown")
+
 # Included attributes and required ones
 include_cols = [c for c in seg_cols if include_flags.get(c, True)]
 required_cols = [col for col, vals in selections.items() if len(vals) > 0 and include_flags.get(col, True)]
@@ -192,7 +197,7 @@ revenue_sql = (
 
 sql = f"""
 SELECT
-  {(", ".join([f'"{c}"' for c in attrs]) + "," if attrs else "")}
+  {(", ".join([f'"{c}"' for c in attrs]) + "," if attrs else ""}
   COUNT(*) AS Visitors,
   SUM(_PURCHASE) AS Purchases,
   100.0 * SUM(_PURCHASE) / NULLIF(COUNT(*),0) AS conv_rate,
@@ -229,9 +234,11 @@ disp.insert(0, "Rank", np.arange(1, len(disp) + 1))
 disp["Conversion %"] = disp["conv_rate"].map(lambda x: f"{x:.2f}%" if pd.notnull(x) else "")
 if "rpv" in disp.columns:
     disp["Revenue / Visitor"] = disp["rpv"].map(lambda x: f"${x:,.2f}" if pd.notnull(x) else "")
+
+# Collapse unknowns for display too
 for col in attrs_present:
     if col in disp.columns:
-        disp[col] = disp[col].fillna("").replace("None", "")
+        disp[col] = disp[col].fillna("Unknown").replace("", "Unknown").replace("None", "Unknown")
 
 table_cols = ["Rank","Visitors","Purchases","Conversion %","Depth"] + sku_cols + attrs_present
 def highlight_conv(s):
