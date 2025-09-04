@@ -68,7 +68,7 @@ with st.sidebar:
   metric_choice = st.radio(
       "Sort metric", ["Conversion %", "Purchases", "Visitors", "Revenue / Visitor"], index=0
   )
-  max_depth = st.slider("Max combo depth", 1, 5, 5, 1)
+  max_depth = st.slider("Max combo depth", 1, 4, 4, 1)
   top_n = st.slider("Top N", 10, 1000, 50, 10)
   min_rows = st.number_input("Minimum Visitors per group", min_value=50, value=500, step=50)
 
