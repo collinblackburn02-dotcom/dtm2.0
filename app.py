@@ -15,6 +15,9 @@ LOGO_URL = "https://raw.githubusercontent.com/collinblackburn02-dotcom/dtm2.0/ma
 SHOW_GLOBAL_FILTERS = False     # hidden for now
 EXCLUDE_STATE = True            # hide/ignore State everywhere
 
+# Start these attributes UNCHECKED on first load
+DEFAULT_UNCHECKED_ATTRS = {"Income Range", "Net Worth", "Credit Rating"}
+
 # Header
 st.title("Heavenly Health — Customer Insights")
 st.caption("Fast, ranked customer segments.")
@@ -132,6 +135,13 @@ if EXCLUDE_STATE and "State" in seg_map:
   state_col = None
   seg_cols = list(seg_map.values())
 
+# --- One-time init so those three attrs start unchecked and empty ---
+if "init_unchecked_v1" not in st.session_state:
+    st.session_state["init_unchecked_v1"] = True
+    for lbl in DEFAULT_UNCHECKED_ATTRS:
+        st.session_state[f"include_{lbl}"] = False   # Include unchecked
+        st.session_state[f"filter_{lbl}"] = []       # No preselected values
+
 # -------------------- Filters (global hidden) --------------------
 dff = df.copy()
 if SHOW_GLOBAL_FILTERS:
@@ -155,7 +165,8 @@ if seg_cols:
       with left:
         st.markdown(f'<div class="attr-title">{label}</div>', unsafe_allow_html=True)
       with right:
-        include_flags[label] = st.checkbox("Include", value=True, key=f"include_{label}")
+        default_include = False if label in DEFAULT_UNCHECKED_ATTRS else True
+        include_flags[label] = st.checkbox("Include", value=default_include, key=f"include_{label}")
 
       # body
       st.markdown('<div class="attr-body">', unsafe_allow_html=True)
